@@ -20,11 +20,12 @@ namespace Dala
     public static class GameSettings
     {
         public static int RenderDistance = 6;      // chunks
-        public static float Fov = 72f;
+        public static float Fov = 70f;
         public static float MouseSensitivity = 0.12f;
         public static int ShadowQuality = 2;        // 0 off, 1 low, 2 high
         public static bool PostFx = true;
         public static bool GrassWind = true;
+        public static bool AutoJump = true;         // step up 1-block ledges by walking into them
         public static bool Fullscreen = true;
         public static bool VSync = true;
         public static float DayLengthMinutes = 24f;
@@ -38,6 +39,7 @@ namespace Dala
             ShadowQuality = PlayerPrefs.GetInt("shadows", ShadowQuality);
             PostFx = PlayerPrefs.GetInt("postfx", 1) == 1;
             GrassWind = PlayerPrefs.GetInt("wind", 1) == 1;
+            AutoJump = PlayerPrefs.GetInt("autojump", 1) == 1;
             Fullscreen = PlayerPrefs.GetInt("fullscreen", 1) == 1;
             VSync = PlayerPrefs.GetInt("vsync", 1) == 1;
             DayLengthMinutes = PlayerPrefs.GetFloat("day", DayLengthMinutes);
@@ -47,7 +49,7 @@ namespace Dala
         public static void Save()
         {
             PlayerPrefs.SetInt("rd", RenderDistance); PlayerPrefs.SetFloat("fov", Fov); PlayerPrefs.SetFloat("sens", MouseSensitivity);
-            PlayerPrefs.SetInt("shadows", ShadowQuality); PlayerPrefs.SetInt("postfx", PostFx ? 1 : 0); PlayerPrefs.SetInt("wind", GrassWind ? 1 : 0);
+            PlayerPrefs.SetInt("shadows", ShadowQuality); PlayerPrefs.SetInt("postfx", PostFx ? 1 : 0); PlayerPrefs.SetInt("wind", GrassWind ? 1 : 0); PlayerPrefs.SetInt("autojump", AutoJump ? 1 : 0);
             PlayerPrefs.SetInt("fullscreen", Fullscreen ? 1 : 0); PlayerPrefs.SetInt("vsync", VSync ? 1 : 0);
             PlayerPrefs.SetFloat("day", DayLengthMinutes); PlayerPrefs.SetFloat("vol", MasterVolume);
             PlayerPrefs.Save();

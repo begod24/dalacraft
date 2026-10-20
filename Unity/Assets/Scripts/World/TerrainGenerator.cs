@@ -23,6 +23,8 @@ namespace Dala
         readonly Vector2 oHeight, oMount, oTemp, oWet, oDetail, oRiver, oForest, oFoot;
         readonly int seed;
 
+        public int Seed => seed;
+
         public TerrainGenerator(int seed)
         {
             this.seed = seed;
@@ -95,17 +97,44 @@ namespace Dala
 
         public float Forest(int wx, int wz) => Fbm(wx * 0.009f, wz * 0.009f, oForest, 3);
 
-        /// <summary>Lowlands below this height (and away from mountains) are built from half-blocks, so no jumping is needed.</summary>
-        public const int SlabCeiling = 44;
-        const float SlabMountMax = 0.12f;
-
-        /// <summary>
-        /// Surface block Y for a column. Lowlands use half-block steps (top block is a slab when
-        /// <paramref name="half"/> is true); mountains use whole-block steps that need jumping.
-        /// </summary>
+        /// <summary>Surface block Y for a column (<paramref name="half"/> is kept for slab support but the generator never sets it).</summary>
         public int Height(int wx, int wz, out bool half)
         {
             float mount = Mountainness(wx, wz);
+            float h = RawHeight(wx, wz, mount);
+            if (Villages) h = FlattenForVillage(wx, wz, h);
+            return Snap(h, mount, out half);
+        }
+
+        /// <summary>Height before aul plateaus are levelled (used to choose aul sites without recursion).</summary>
+        public int BaseHeight(int wx, int wz)
+        {
+            float mount = Mountainness(wx, wz);
+            return Snap(RawHeight(wx, wz, mount), mount, out _);
+        }
+
+        /// <summary>When true, the ground under every aul is levelled to one plateau with soft ramps at its edge.</summary>
+        public bool Villages;
+        public const float AulFlatRadius = 40f, AulRamp = 12f;
+
+        float FlattenForVillage(int wx, int wz, float h)
+        {
+            int rx = Mathf.FloorToInt(wx / (float)Village.Region), rz = Mathf.FloorToInt(wz / (float)Village.Region);
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dz = -1; dz <= 1; dz++)
+                {
+                    var v = Village.At(new Vector2Int(rx + dx, rz + dz), this, seed);
+                    if (v == null) continue;
+                    float d = Vector2.Distance(new Vector2(wx, wz), v.Center);
+                    if (d >= AulFlatRadius + AulRamp) continue;
+                    float k = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(AulFlatRadius + AulRamp, AulFlatRadius, d));
+                    h = Mathf.Lerp(h, v.Ground, k);
+                }
+            return h;
+        }
+
+        float RawHeight(int wx, int wz, float mount)
+        {
             float rolling = Fbm(wx * 0.012f, wz * 0.012f, oHeight, 3);
             float h = 32f + (rolling - 0.5f) * 14f;                       // steppe: gentle hills
             float ridge = 1f - Mathf.Abs(Fbm(wx * 0.01f, wz * 0.01f, oDetail, 4) * 2f - 1f);
@@ -117,18 +146,13 @@ namespace Dala
             // Rivers: carve a channel below sea level so it fills with water; fade out in the mountains
             float river = Riverness(wx, wz) * Mathf.Clamp01(1f - mount * 2.5f);
             h = Mathf.Lerp(h, Mathf.Min(h, SeaLevel - 2.6f), river);
-            h = Mathf.Clamp(h, 2f, Chunk.Height - 4);
+            return Mathf.Clamp(h, 2f, Chunk.Height - 4);
+        }
 
+        /// <summary>Whole blocks only, like Minecraft: no slab steps in the terrain (1-block steps are climbed with auto-jump).</summary>
+        static int Snap(float h, float mount, out bool half)
+        {
             half = false;
-            if (mount < SlabMountMax && h < SlabCeiling)
-            {
-                // snap to the nearest 0.5: .0-.25 -> full, .25-.75 -> slab, .75+ -> next full
-                int y = Mathf.FloorToInt(h);
-                float f = h - y;
-                if (f >= 0.75f) y++;
-                else half = f >= 0.25f;
-                return y;
-            }
             return Mathf.RoundToInt(h);
         }
 
@@ -212,6 +236,47 @@ namespace Dala
                     if (half) chunk.Half[x, h, z] = true;
                     // frozen lakes in the snow
                     if (biome == Biome.Snowy && h < SeaLevel) chunk.Blocks[x, SeaLevel, z] = BlockType.Ice;
+                }
+            Trees.Populate(this, chunk, seed);
+            Features.Populate(this, chunk, seed);
+            if (Villages) PlaceVillageBlocks(chunk);
+        }
+
+        /// <summary>True if the column lies within <paramref name="radius"/> of an aul centre.</summary>
+        public bool InVillage(int wx, int wz, float radius)
+        {
+            if (!Villages) return false;
+            int rx = Mathf.FloorToInt(wx / (float)Village.Region), rz = Mathf.FloorToInt(wz / (float)Village.Region);
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dz = -1; dz <= 1; dz++)
+                {
+                    var v = Village.At(new Vector2Int(rx + dx, rz + dz), this, seed);
+                    if (v != null && (new Vector2(wx, wz) - v.Center).sqrMagnitude < radius * radius) return true;
+                }
+            return false;
+        }
+
+        /// <summary>Builds the auls' block structures (corral fences) that fall into this chunk, standing on the surface.</summary>
+        void PlaceVillageBlocks(Chunk chunk)
+        {
+            int ox = chunk.Coord.x * Chunk.Size, oz = chunk.Coord.y * Chunk.Size;
+            int rx = Mathf.FloorToInt((ox + 8) / (float)Village.Region), rz = Mathf.FloorToInt((oz + 8) / (float)Village.Region);
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dz = -1; dz <= 1; dz++)
+                {
+                    var v = Village.At(new Vector2Int(rx + dx, rz + dz), this, seed);
+                    if (v == null) continue;
+                    foreach (var (p, type, meta) in v.Blocks)
+                    {
+                        int lx = p.x - ox, lz = p.z - oz;
+                        if (lx < 0 || lx >= Chunk.Size || lz < 0 || lz >= Chunk.Size) continue;
+                        int y = v.Ground + p.y;
+                        if (y <= 0 || y >= Chunk.Height) continue;
+                        chunk.Blocks[lx, y, lz] = type; chunk.Metas[lx, y, lz] = meta;
+                        // structures never float: fill any dip under their floor
+                        if (p.y <= 1 && type != BlockType.Air)
+                            for (int yy = y - 1; yy > 0 && !BlockInfo.IsSolid(chunk.Blocks[lx, yy, lz]); yy--) chunk.Blocks[lx, yy, lz] = BlockType.Dirt;
+                    }
                 }
         }
     }

@@ -60,7 +60,14 @@ namespace Dala
             c.Decorated = true;
             var lib = world.Foliage;
             int ox = c.Coord.x * Chunk.Size, oz = c.Coord.y * Chunk.Size;
-            var trees = new List<Vector2Int>();
+            var taken = new bool[Chunk.Size, Chunk.Size];   // cells already holding a tree / rock / prop
+            // block trees from the generator: their trunks (and the cells around them) are taken first
+            for (int x = 0; x < Chunk.Size; x++)
+                for (int z = 0; z < Chunk.Size; z++)
+                {
+                    int t = c.Top[x, z];
+                    if (t + 1 < Chunk.Height && BlockInfo.IsLog(c.Blocks[x, t + 1, z])) Take(taken, x, z, 1);
+                }
             var parent = c.Go.transform;
             var villages = NearbyVillages(world, c);
 
@@ -82,33 +89,35 @@ namespace Dala
                         // lily pads and reeds in shallow water
                         int depth = TerrainGenerator.SeaLevel - top;
                         if (biome == Biome.Snowy) continue;
-                        if (depth <= 1 && r1 < 0.25f) Foliage(c, lib, "Reed", x, top, z, new Vector3(pos.x, top + 1f, pos.z), r2);
-                        else if (depth <= 3 && r1 < 0.035f) Place(parent, "Environment/SM_LilyPad", new Vector3(pos.x, TerrainGenerator.SeaLevel + 0.86f, pos.z), r2 * 360f, 1f, false);
+                        // reeds only fringe the bank; lily pads float on calm water a little further out
+                        if (depth <= 1 && r1 < 0.3f && NearShore(world, c, wx, wz, 2)) Foliage(c, lib, "Reed", x, top, z, new Vector3(pos.x, top + 1f, pos.z), r2);
+                        else if (c.Blocks[x, top + 1, z] == BlockType.Water) LakeBed(c, lib, x, top, z, new Vector3(pos.x, surf, pos.z), depth, R(wx, wz, 9), r2, r3);
                         continue;
                     }
 
                     // keep aul grounds clear of trees and rocks
                     bool inAul = false;
-                    foreach (var v in villages) if ((new Vector2(wx, wz) - v.Center).sqrMagnitude < 34 * 34) { inAul = true; break; }
+                    foreach (var v in villages) if ((new Vector2(wx, wz) - v.Center).sqrMagnitude < 52 * 52) { inAul = true; break; }
                     if (inAul)
                     {
-                        if (r1 < 0.35f) Foliage(c, lib, r2 < 0.8f ? "Grass_Short" : "Chamomile", x, top, z, pos, r3);
+                        if (r1 < 0.35f && (ground == BlockType.Grass || ground == BlockType.DryGrass) && c.Blocks[x, top + 1, z] == BlockType.Air)
+                            Foliage(c, lib, r2 < 0.8f ? "Grass_Short" : "Chamomile", x, top, z, pos, r3);
                         continue;
                     }
 
-                    // ---- trees (spaced at least 3 blocks apart) ----
-                    string tree = TreeFor(biome, ground, top, r1, r2, wx, wz, world);
-                    if (tree != null && x > 0 && x < Chunk.Size - 1 && z > 0 && z < Chunk.Size - 1 && FarFrom(trees, x, z, biome == Biome.Taiga ? 3 : 4))
-                    {
-                        trees.Add(new Vector2Int(x, z));
-                        Place(parent, "Trees/SM_" + tree, new Vector3(wx + 0.5f, surf - 0.05f, wz + 0.5f), r3 * 360f, 0.85f + r2 * 0.35f, true);
-                        continue;
-                    }
+                    // ---- trees are real blocks now (Trees.Populate): keep props and plants off trunks and out of low leaves ----
+                    if (top + 1 < Chunk.Height && c.Blocks[x, top + 1, z] != BlockType.Air) continue;
 
                     // ---- props & landmarks ----
-                    if (PlaceProp(parent, biome, ground, pos, r1, r2, r3, wx, wz, world)) continue;
+                    if (Free(taken, x, z, 1) && Slope(world, c, wx, wz, 1, out float low) <= 1f
+                        && PlaceProp(parent, biome, ground, new Vector3(pos.x, low, pos.z), r1, r2, r3, wx, wz, world))
+                    {
+                        Take(taken, x, z, 1);
+                        continue;
+                    }
 
                     // ---- plants (GPU instanced) ----
+                    if (taken[x, z]) continue;
                     string plant = PlantFor(biome, ground, top, r1, r2, wx, wz, world);
                     if (plant != null) Foliage(c, lib, plant, x, top, z, pos, r3);
                 }
@@ -116,6 +125,14 @@ namespace Dala
             foreach (var v in villages) PlaceVillage(world, c, v);
             DecorateCaves(world, c);
             if (Session.InGame) SpawnFauna(world, c);
+        }
+
+        /// <summary>Lake and river beds: swaying weeds (instanced foliage, like grass) and algae-covered stones; weeds stay below the surface.</summary>
+        static void LakeBed(Chunk c, FoliageLibrary lib, int x, int top, int z, Vector3 at, int depth, float r, float r2, float r3)
+        {
+            if (r < 0.10f && depth >= 3) Foliage(c, lib, "Seaweed_Tall", x, top, z, at, r2);
+            else if (r < 0.22f && depth >= 2) Foliage(c, lib, r2 < 0.5f ? "Seaweed_Short" : "Eelgrass", x, top, z, at, r3);
+            else if (r < 0.27f && depth >= 2) Foliage(c, lib, "Hornwort", x, top, z, at, r2);
         }
 
         // ---------------------------------------------------------------- auls
@@ -148,51 +165,31 @@ namespace Dala
         {
             foreach (var pr in v.Props)
                 if (InChunk(c, pr.pos))
-                    Place(c.Go.transform, pr.path, new Vector3(pr.pos.x, GroundY(w, pr.pos) - 0.05f, pr.pos.y), pr.yaw, pr.scale, pr.collide, pr.fire);
+                    Place(c.Go.transform, pr.path, new Vector3(pr.pos.x, LowestGround(w, pr.pos, pr.radius) - 0.05f, pr.pos.y), pr.yaw, pr.scale, pr.collide, pr.fire);
             if (!Session.InGame || !InChunk(c, v.Center)) return;
             foreach (var p in v.People) Villager.Spawn(p.npc, new Vector3(p.pos.x, GroundY(w, p.pos) + 0.5f, p.pos.y));
             foreach (var a in v.Livestock) Animal.Spawn(a.animal, new Vector3(a.pos.x, GroundY(w, a.pos) + 0.5f, a.pos.y), Random.Range(0f, 360f));
         }
 
         // ---------------------------------------------------------------- caves
+        /// <summary>Cave crystals, glow mushrooms and dripstone are blocks now (Features) and glow through light levels; here: bones and treasure.</summary>
         static void DecorateCaves(World w, Chunk c)
         {
             int ox = c.Coord.x * Chunk.Size, oz = c.Coord.y * Chunk.Size;
             var parent = c.Go.transform;
-            int lights = 0;
             for (int x = 1; x < Chunk.Size - 1; x++)
                 for (int z = 1; z < Chunk.Size - 1; z++)
                 {
                     int top = c.Top[x, z];
                     for (int y = 4; y < top - 4; y++)
                     {
-                        if (c.Blocks[x, y, z] != BlockType.Air) continue;
+                        var b = c.Blocks[x, y, z];
                         int wx = ox + x, wz = oz + z;
-                        float r = TerrainGenerator.Hash(wx, y, wz, salt + 11);
-                        bool floor = BlockInfo.IsOpaque(c.Blocks[x, y - 1, z]);
-                        bool ceil = BlockInfo.IsOpaque(c.Blocks[x, y + 1, z]);
                         var at = new Vector3(wx + 0.5f, y, wz + 0.5f);
-                        if (floor)
-                        {
-                            if (r < 0.012f) Place(parent, "Dungeon/SM_Stalagmite_" + (r < 0.006f ? 1 : 2), at, r * 30000f, 1f, true);
-                            else if (r < 0.020f && y < 34)
-                            {
-                                string[] cr = { "Crystal_Turquoise", "Crystal_Amethyst", "Crystal_Ruby" };
-                                var col = new[] { new Color(0.3f, 0.9f, 0.9f), new Color(0.7f, 0.4f, 1f), new Color(1f, 0.3f, 0.3f) };
-                                int k = (int)(r * 100000) % 3;
-                                var g = Place(parent, "Dungeon/SM_" + cr[k], at, r * 50000f, 1f, false);
-                                if (g != null && lights < 3) { CaveLight(g.transform, col[k], 4f); lights++; }
-                            }
-                            else if (r < 0.028f)
-                            {
-                                var g = Place(parent, "Dungeon/SM_GlowMushrooms", at, r * 40000f, 1f, false);
-                                if (g != null && lights < 3) { CaveLight(g.transform, new Color(0.3f, 0.7f, 1f), 3f); lights++; }
-                            }
-                            else if (r < 0.031f) Place(parent, "Dungeon/SM_Bones", at, r * 70000f, 1f, false);
-                            else if (r < 0.0318f && y < 24) Treasure(parent, at, r);
-                        }
-                        else if (ceil && r > 0.985f)
-                            Place(parent, "Dungeon/SM_Stalactite_" + (r > 0.993f ? 1 : 2), at + Vector3.up * 1f, r * 30000f, 1f, true);
+                        if (b != BlockType.Air || !BlockInfo.IsOpaque(c.Blocks[x, y - 1, z])) continue;
+                        float r = TerrainGenerator.Hash(wx, y, wz, salt + 17);
+                        if (r < 0.003f) Place(parent, "Dungeon/SM_Bones", at, r * 70000f, 1f, false);
+                        else if (r < 0.0038f && y < 24) Treasure(parent, at, r);
                     }
                 }
         }
@@ -210,21 +207,88 @@ namespace Dala
             Place(parent, "Dungeon/SM_GoldPile", at + new Vector3(1.2f, 0, 0.4f), 0, 1f, false);
             if (chest == null) return;
             var t = chest.AddComponent<TreasureMarker>();
-            t.Legendary = r < 0.0312f;
+            t.Legendary = r < 0.0032f;
             if (t.Legendary) Place(parent, "Dungeon/SM_AltynAdamCrown", at + new Vector3(-1.1f, 0, 0.3f), 0, 1f, false);
             CaveLight(chest.transform, new Color(1f, 0.8f, 0.4f), 5f);
         }
 
-        static bool FarFrom(List<Vector2Int> list, int x, int z, int d)
+        // ---------------------------------------------------------------- ground helpers
+        /// <summary>Top surface (block top, half-blocks included) of a column — from the chunk when it is inside, else from the generator.</summary>
+        static float Surface(World w, Chunk c, int wx, int wz)
         {
-            foreach (var p in list) if (Mathf.Abs(p.x - x) < d && Mathf.Abs(p.y - z) < d) return false;
+            int lx = wx - c.Coord.x * Chunk.Size, lz = wz - c.Coord.y * Chunk.Size;
+            if (lx >= 0 && lx < Chunk.Size && lz >= 0 && lz < Chunk.Size)
+            {
+                int t = c.Top[lx, lz];
+                return t + (c.Half[lx, t, lz] ? 0.5f : 1f);
+            }
+            int h = w.Terrain.Height(wx, wz, out bool half);
+            return h + (half ? 0.5f : 1f);
+        }
+
+        /// <summary>Height difference across a (2r+1)² footprint; <paramref name="low"/> is its lowest surface.</summary>
+        static float Slope(World w, Chunk c, int wx, int wz, int r, out float low)
+        {
+            low = float.MaxValue; float high = float.MinValue;
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
+                {
+                    float s = Surface(w, c, wx + dx, wz + dz);
+                    low = Mathf.Min(low, s); high = Mathf.Max(high, s);
+                }
+            return high - low;
+        }
+
+        /// <summary>Lowest surface under a round footprint, so wide models sink into slopes instead of hanging off them.</summary>
+        static float LowestGround(World w, Vector2 p, float radius)
+        {
+            float low = GroundY(w, p);
+            if (radius <= 0.01f) return low;
+            for (int i = 0; i < 8; i++)
+            {
+                float a = i * Mathf.PI / 4f;
+                low = Mathf.Min(low, GroundY(w, p + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * radius * 0.8f));
+            }
+            return low;
+        }
+
+        /// <summary>True if dry land (surface above the water line) is within <paramref name="r"/> blocks.</summary>
+        static bool NearShore(World w, Chunk c, int wx, int wz, int r)
+        {
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
+                    if ((dx != 0 || dz != 0) && Surface(w, c, wx + dx, wz + dz) > TerrainGenerator.SeaLevel + 0.9f) return true;
+            return false;
+        }
+
+        static bool Free(bool[,] taken, int x, int z, int r)
+        {
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
+                {
+                    int ax = x + dx, az = z + dz;
+                    if (ax >= 0 && ax < Chunk.Size && az >= 0 && az < Chunk.Size && taken[ax, az]) return false;
+                }
             return true;
+        }
+
+        static void Take(bool[,] taken, int x, int z, int r)
+        {
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
+                {
+                    int ax = x + dx, az = z + dz;
+                    if (ax >= 0 && ax < Chunk.Size && az >= 0 && az < Chunk.Size) taken[ax, az] = true;
+                }
         }
 
         static void Foliage(Chunk c, FoliageLibrary lib, string name, int x, int y, int z, Vector3 pos, float r)
         {
             int id = lib.Get(name);
             if (id < 0) return;
+            // a cell the player changed (or picked the grass from) stays as they left it
+            var w = World.Instance;
+            if (w != null && w.Edits.ContainsKey(new Vector3Int(c.Coord.x * Chunk.Size + x, y + 1, c.Coord.y * Chunk.Size + z))) return;
             float s = 0.8f + r * 0.45f;
             c.AddFoliage(id, x, y + 1, z, Matrix4x4.TRS(pos, Quaternion.Euler(0, r * 360f, 0), new Vector3(s, s * (0.85f + r * 0.3f), s)));
         }
@@ -238,43 +302,8 @@ namespace Dala
             if (collide)
                 foreach (var mf in go.GetComponentsInChildren<MeshFilter>())
                     mf.gameObject.AddComponent<MeshCollider>().sharedMesh = mf.sharedMesh;
-            if (fire) go.AddComponent<FireVfx>();
+            if (fire) go.AddComponent<FireVfx>().FitToModel = true;
             return go;
-        }
-
-        static string TreeFor(Biome b, BlockType ground, int top, float r1, float r2, int wx, int wz, World w)
-        {
-            if (ground != BlockType.Grass && ground != BlockType.DryGrass && ground != BlockType.Snow && ground != BlockType.Sand && ground != BlockType.MossStone) return null;
-            float forest = w.Terrain.Forest(wx, wz);
-            switch (b)
-            {
-                case Biome.Taiga:
-                    if (r1 > 0.09f) return null;
-                    return r2 < 0.35f ? "Spruce" : r2 < 0.6f ? "Fir" : r2 < 0.82f ? "Cedar" : "Pine";
-                case Biome.Snowy:
-                    if (top > 92 || r1 > 0.02f) return null;
-                    return r2 < 0.5f ? "Spruce_Snow" : r2 < 0.8f ? "Fir_Snow" : "Pine_Snow";
-                case Biome.BirchGrove:
-                    if (r1 > 0.07f) return null;
-                    return r2 < 0.6f ? "Birch" : r2 < 0.75f ? "Birch_Autumn" : r2 < 0.92f ? "Aspen" : "Rosehip";
-                case Biome.Tugai:
-                    if (r1 > 0.06f) return null;
-                    return r2 < 0.4f ? "Turanga" : r2 < 0.7f ? "Willow" : "Tamarisk";
-                case Biome.AppleForest:
-                    if (r1 > 0.07f) return null;
-                    return r2 < 0.5f ? "WildApple" : r2 < 0.72f ? "Apricot_Blossom" : r2 < 0.9f ? "Hawthorn" : "Aspen";
-                case Biome.Altai:
-                    if (r1 > 0.012f) return null;
-                    return r2 < 0.5f ? "Pine" : "Birch";
-                case Biome.BetpakDala:
-                    if (ground != BlockType.Sand || r1 > 0.006f) return null;
-                    return r2 < 0.8f ? null : "DeadTree";
-                case Biome.Steppe:
-                    // lone birches / rosehip bushes at the edge of groves
-                    if (forest > 0.55f && r1 < 0.01f) return r2 < 0.6f ? "Birch" : "Rosehip";
-                    return null;
-            }
-            return null;
         }
 
         static string PlantFor(Biome b, BlockType ground, int top, float r1, float r2, int wx, int wz, World w)
@@ -318,59 +347,27 @@ namespace Dala
             switch (b)
             {
                 case Biome.Steppe:
-                    if (rp < 0.0006f && Flat(w, wx, wz, 4)) { Aul(parent, pos, yaw); return true; }
                     if (rp < 0.0013f) { Place(parent, "Environment/SM_Balbal", pos, yaw, 1f, true); return true; }
                     if (rp < 0.0016f) { Place(parent, "Environment/SM_Oba", pos, yaw, 1f, true); return true; }
-                    if (rp < 0.0040f) { Place(parent, "Props/SM_Rock_" + (1 + (int)(r2 * 2.99f)), pos, yaw, 0.7f + r2 * 0.6f, true); return true; }
                     break;
                 case Biome.BetpakDala:
-                    if (rp < 0.004f) { Place(parent, "Props/SM_Saxaul", pos, yaw, 0.8f + r2 * 0.4f, true); return true; }
                     if (rp < 0.0052f) { Place(parent, "Environment/SM_RamSkull", pos, yaw, 1f, false); return true; }
-                    if (rp < 0.0062f) { Place(parent, "Environment/SM_Tumbleweed", pos, yaw, 1f, false); return true; }
-                    if (rp < 0.0068f && ground == BlockType.RedSand) { Place(parent, "Environment/SM_RedRock_Pillar_" + (r2 < 0.5f ? 1 : 2), pos - Vector3.up * 0.4f, yaw, 1f, true); return true; }
-                    if (rp < 0.0075f && ground == BlockType.Takyr) { Place(parent, "Environment/SM_TakyrSlab", pos, yaw, 1f, false); return true; }
                     break;
                 case Biome.Taiga:
-                    if (rp < 0.004f) { Place(parent, "Environment/SM_" + (r2 < 0.4f ? "Log_Pine" : r2 < 0.7f ? "Stump" : "MossyRock"), pos, yaw, 1f, true); return true; }
-                    if (rp < 0.008f) { Place(parent, "Environment/SM_" + (r2 < 0.5f ? "Mushrooms_FlyAgaric" : "Mushrooms_Boletus"), pos, yaw, 1f, false); return true; }
                     break;
                 case Biome.BirchGrove:
-                    if (rp < 0.003f) { Place(parent, "Environment/SM_" + (r2 < 0.5f ? "Log_Birch" : "Stump"), pos, yaw, 1f, true); return true; }
-                    if (rp < 0.007f) { Place(parent, "Environment/SM_Mushrooms_Boletus", pos, yaw, 1f, false); return true; }
                     break;
                 case Biome.Snowy:
-                    if (rp < 0.004f) { Place(parent, "Environment/SM_" + (r2 < 0.4f ? "Snowdrift" : r2 < 0.75f ? "SnowRock" : "IceChunk"), pos, yaw, 1f, true); return true; }
                     break;
                 case Biome.Altai:
                 case Biome.AppleForest:
-                    if (rp < 0.003f) { Place(parent, "Environment/SM_" + (r2 < 0.5f ? "MossyRock" : "PetroglyphRock"), pos, yaw, 1f, true); return true; }
+                    if (rp < 0.0012f) { Place(parent, "Environment/SM_PetroglyphRock", pos, yaw, 1f, true); return true; }
                     break;
                 case Biome.Balkhash:
                 case Biome.Tugai:
-                    if (rp < 0.006f) { Place(parent, "Environment/SM_" + (r2 < 0.5f ? "ShorePebbles" : "Driftwood"), pos, yaw, 1f, false); return true; }
                     break;
             }
             return false;
-        }
-
-        static bool Flat(World w, int wx, int wz, int r)
-        {
-            int h = w.Terrain.Height(wx, wz, out _);
-            for (int dx = -r; dx <= r; dx += r)
-                for (int dz = -r; dz <= r; dz += r)
-                    if (Mathf.Abs(w.Terrain.Height(wx + dx, wz + dz, out _) - h) > 1) return false;
-            return h > TerrainGenerator.SeaLevel + 1;
-        }
-
-        /// <summary>A small nomad camp: yurt, campfire with living fire, kazan, hitching post.</summary>
-        static void Aul(Transform parent, Vector3 pos, float yaw)
-        {
-            var rot = Quaternion.Euler(0, yaw, 0);
-            Place(parent, "Props/SM_Yurt", pos, yaw, 1f, true);
-            var fire = Place(parent, "Household/SM_Campfire_Base", pos + rot * new Vector3(0, 0, 6f), 0, 1f, false, true);
-            Place(parent, "Household/SM_Kazan", pos + rot * new Vector3(2.2f, 0, 6.5f), yaw, 1f, true);
-            Place(parent, "Household/SM_HitchingPost", pos + rot * new Vector3(-5f, 0, 3f), yaw + 90f, 1f, true);
-            Place(parent, "Household/SM_Sandyq", pos + rot * new Vector3(1.5f, 0, -1.2f), yaw, 1f, true);
         }
 
         // ---------------------------------------------------------------- fauna
@@ -384,15 +381,17 @@ namespace Dala
             [Biome.Taiga] = new[] { ("Wolf", 2, 4, 2f), ("Fox", 1, 1, 1f), ("Hare", 1, 2, 2f) },
             [Biome.Snowy] = new[] { ("SnowLeopard", 1, 1, 1f), ("Goat", 1, 3, 1.5f) },
             [Biome.BirchGrove] = new[] { ("Hare", 1, 2, 2f), ("Fox", 1, 1, 1f), ("Cow", 1, 2, 1f), ("Horse", 1, 3, 1f) },
-            [Biome.Tugai] = new[] { ("Duck", 2, 4, 2f), ("Fish", 2, 4, 2f), ("Kulan", 2, 3, 1f), ("Snake", 1, 1, 0.5f) },
-            [Biome.Balkhash] = new[] { ("Duck", 2, 5, 3f), ("Fish", 2, 5, 3f) },
+            [Biome.Tugai] = new[] { ("Duck", 2, 4, 2f), ("Kulan", 2, 3, 1f), ("Snake", 1, 1, 0.5f) },
+            [Biome.Balkhash] = new[] { ("Duck", 2, 5, 3f) },
         };
         public const int MaxAnimals = 60;
 
         static void SpawnFauna(World world, Chunk c)
         {
             int ox = c.Coord.x * Chunk.Size, oz = c.Coord.y * Chunk.Size;
-            if (R(ox, oz, 31) > 0.11f || Animal.All.Count >= MaxAnimals) return;
+            if (Animal.All.Count >= MaxAnimals) return;
+            FishSchool(c, ox, oz);
+            if (R(ox, oz, 31) > 0.11f) return;
             int lx = 2 + (int)(R(ox, oz, 32) * 12), lz = 2 + (int)(R(ox, oz, 33) * 12);
             var biome = c.Biomes[lx, lz];
             if (!Fauna.TryGetValue(biome, out var table)) return;
@@ -409,6 +408,21 @@ namespace Dala
                 if (aquatic != (top < TerrainGenerator.SeaLevel)) return;
                 float y = choice.sp == "Fish" ? TerrainGenerator.SeaLevel - 1f : top + 1.2f;
                 Animal.Spawn(choice.sp, new Vector3(ax, y, az), R(ox + i, oz + i, 38) * 360f);
+            }
+        }
+
+        /// <summary>A school of 3–6 fish in water at least 2 blocks deep (about every third lake chunk).</summary>
+        static void FishSchool(Chunk c, int ox, int oz)
+        {
+            if (R(ox, oz, 41) > 0.35f) return;
+            int lx = 2 + (int)(R(ox, oz, 42) * 12), lz = 2 + (int)(R(ox, oz, 43) * 12);
+            int top = c.Top[lx, lz];
+            if (TerrainGenerator.SeaLevel - top < 2 || c.Biomes[lx, lz] == Biome.Snowy) return;
+            int n = 3 + (int)(R(ox, oz, 44) * 3.99f);
+            for (int i = 0; i < n; i++)
+            {
+                float fx = ox + lx + 0.5f + (R(ox + i, oz, 45) - 0.5f) * 3f, fz = oz + lz + 0.5f + (R(ox, oz + i, 46) - 0.5f) * 3f;
+                Animal.Spawn("Fish", new Vector3(fx, (top + 1 + TerrainGenerator.SeaLevel + 1) * 0.5f, fz), R(ox + i, oz + i, 47) * 360f);
             }
         }
 

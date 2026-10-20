@@ -61,11 +61,11 @@ ModelImporter:
       maskSource: {instanceID: 0}
       additiveReferencePoseFrame: 0
     - serializedVersion: 16
-      name: Apa_Walk
-      takeName: Apa_Walk
-      internalID: -8970967109685872923
+      name: Apa_Talk
+      takeName: Apa_Talk
+      internalID: -2620597867366053892
       firstFrame: 0
-      lastFrame: 24
+      lastFrame: 48
       wrapMode: 0
       orientationOffsetY: 0
       level: 0
@@ -90,11 +90,11 @@ ModelImporter:
       maskSource: {instanceID: 0}
       additiveReferencePoseFrame: 0
     - serializedVersion: 16
-      name: Apa_Talk
-      takeName: Apa_Talk
-      internalID: -2620597867366053892
+      name: Apa_Walk
+      takeName: Apa_Walk
+      internalID: -8970967109685872923
       firstFrame: 0
-      lastFrame: 48
+      lastFrame: 24
       wrapMode: 0
       orientationOffsetY: 0
       level: 0

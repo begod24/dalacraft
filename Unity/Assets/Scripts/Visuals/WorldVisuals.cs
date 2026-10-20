@@ -36,13 +36,15 @@ namespace Dala
             CloudLitId = Shader.PropertyToID("_CloudLit"), CloudShadeId = Shader.PropertyToID("_CloudShade"),
             CloudCoverId = Shader.PropertyToID("_CloudCover"), NightId = Shader.PropertyToID("_Night"), CloudTimeId = Shader.PropertyToID("_CloudTime"),
             AmbSkyId = Shader.PropertyToID("_AmbientSky"), AmbGroundId = Shader.PropertyToID("_AmbientGround"),
-            WindDirId = Shader.PropertyToID("_WindDir"), WindStrengthId = Shader.PropertyToID("_WindStrength");
+            WindDirId = Shader.PropertyToID("_WindDir"), WindStrengthId = Shader.PropertyToID("_WindStrength"),
+            DayLightId = Shader.PropertyToID("_DayLight"), BlockLightColorId = Shader.PropertyToID("_BlockLightColor");
+        float lightsTimer;
 
         // Palette keyed by sun elevation
         static readonly Color DayZenith = new(0.24f, 0.47f, 0.86f), DayHorizon = new(0.68f, 0.81f, 0.95f);
         static readonly Color SetZenith = new(0.26f, 0.30f, 0.55f), SetHorizon = new(1.00f, 0.56f, 0.30f);
         static readonly Color NightZenith = new(0.01f, 0.02f, 0.06f), NightHorizon = new(0.05f, 0.07f, 0.14f);
-        static readonly Color SunDay = new(1.00f, 0.95f, 0.86f), SunSet = new(1.00f, 0.52f, 0.25f);
+        static readonly Color SunDay = new(1.00f, 0.91f, 0.76f), SunSet = new(1.00f, 0.52f, 0.25f);
 
         public void Init(Camera camera)
         {
@@ -62,7 +64,7 @@ namespace Dala
 
             sky = new Material(Shader.Find("Dala/Sky")) { name = "DalaSky" };
             RenderSettings.skybox = sky;
-            RenderSettings.ambientMode = AmbientMode.Trilight;
+            RenderSettings.ambientMode = AmbientMode.Custom;          // models use the probe built in Apply
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Linear;
 
@@ -109,19 +111,17 @@ namespace Dala
 
             var tm = p.Add<Tonemapping>(true); tm.mode.Override(TonemappingMode.ACES);
             bloom = p.Add<Bloom>(true);
-            bloom.threshold.Override(0.95f); bloom.intensity.Override(0.9f); bloom.scatter.Override(0.72f);
+            bloom.threshold.Override(0.85f); bloom.intensity.Override(1.2f); bloom.scatter.Override(0.78f);
             bloom.tint.Override(new Color(1f, 0.93f, 0.82f)); bloom.highQualityFiltering.Override(true);
             colorAdj = p.Add<ColorAdjustments>(true);
-            colorAdj.postExposure.Override(0.45f); colorAdj.contrast.Override(14f); colorAdj.saturation.Override(12f);
+            colorAdj.postExposure.Override(0.45f); colorAdj.contrast.Override(12f); colorAdj.saturation.Override(20f);
             var wb = p.Add<WhiteBalance>(true); wb.temperature.Override(6f); wb.tint.Override(2f);
             var st = p.Add<SplitToning>(true);
-            st.shadows.Override(new Color(0.42f, 0.50f, 0.62f)); st.highlights.Override(new Color(0.70f, 0.60f, 0.45f)); st.balance.Override(-15f);
+            st.shadows.Override(new Color(0.38f, 0.50f, 0.68f)); st.highlights.Override(new Color(0.74f, 0.62f, 0.44f)); st.balance.Override(-20f);
             var lgg = p.Add<LiftGammaGain>(true);
-            lgg.lift.Override(new Vector4(0.98f, 0.99f, 1.02f, -0.02f));
+            lgg.lift.Override(new Vector4(0.97f, 0.99f, 1.04f, 0.0f));   // cool, open shadows (no crushed blacks)
             lgg.gain.Override(new Vector4(1.02f, 1.0f, 0.97f, 0.03f));
-            var vig = p.Add<Vignette>(true); vig.intensity.Override(0.24f); vig.smoothness.Override(0.45f);
-            var ca = p.Add<ChromaticAberration>(true); ca.intensity.Override(0.04f);
-            var grain = p.Add<FilmGrain>(true); grain.type.Override(FilmGrainLookup.Thin1); grain.intensity.Override(0.08f);
+            var vig = p.Add<Vignette>(true); vig.intensity.Override(0.28f); vig.smoothness.Override(0.5f);
             vol.profile = p;
         }
 
@@ -130,6 +130,9 @@ namespace Dala
             TimeOfDay = Mathf.Repeat(TimeOfDay + Time.deltaTime / (DayLengthMinutes * 60f), 1f);
             cloudTime += Time.deltaTime * (0.6f + Wind);
             Apply(Time.deltaTime);
+            // fires near the camera light the instanced grass (chunks carry their own light levels)
+            lightsTimer -= Time.deltaTime;
+            if (lightsTimer <= 0 && cam != null) { lightsTimer = 0.3f; Lighting.UpdateShaderLights(cam.transform.position); }
         }
 
         public float SunElevation { get; private set; }
@@ -160,20 +163,31 @@ namespace Dala
             bool moon = elev < -0.04f;
             Vector3 lightDir = moon ? -sunDir : sunDir;
             Sun.transform.rotation = Quaternion.LookRotation(-lightDir);
-            float sunI = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-0.04f, 0.18f, elev)) * 1.9f;
-            float moonI = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-0.04f, -0.25f, elev)) * 0.22f;
+            float sunI = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-0.04f, 0.18f, elev)) * 2.3f;
+            float moonI = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-0.04f, -0.25f, elev)) * 0.38f;
             Sun.intensity = (moon ? moonI : sunI) * (1f - Overcast * 0.65f);
             Sun.color = moon ? new Color(0.62f, 0.72f, 1f) : sunCol;
             Sun.shadowStrength = Mathf.Lerp(0.9f, 0.35f, Overcast);
 
             // Ambient: sky light from above, bounce from the ground
-            Color ambSky = Color.Lerp(zenith, horizon, 0.45f) * (0.55f + 0.25f * day) + new Color(0.03f, 0.035f, 0.05f);
-            Color ambGround = Color.Lerp(new Color(0.06f, 0.06f, 0.08f), new Color(0.36f, 0.31f, 0.24f), day);
+            // a bluer sky fill gives the cool shadows of shader packs against warm sunlight
+            Color ambSky = Color.Lerp(zenith, horizon, 0.35f) * (0.62f + 0.38f * day) + new Color(0.03f, 0.045f, 0.08f);
+            // moonlit night: dim blue but readable, like Minecraft's sky light at night
+            ambSky += new Color(0.07f, 0.09f, 0.16f) * night;
+            Color ambGround = Color.Lerp(new Color(0.10f, 0.11f, 0.15f), new Color(0.36f, 0.31f, 0.24f), day);
+            Shader.SetGlobalFloat(DayLightId, day * (1f - Overcast * 0.4f));
+            Shader.SetGlobalColor(BlockLightColorId, new Color(1.0f, 0.78f, 0.52f));
             Shader.SetGlobalColor(AmbSkyId, ambSky);
             Shader.SetGlobalColor(AmbGroundId, ambGround);
             RenderSettings.ambientSkyColor = ambSky;
             RenderSettings.ambientEquatorColor = horizon * 0.6f;
             RenderSettings.ambientGroundColor = ambGround;
+            // Models (trees, yurts, animals) light their shaded sides from the ambient probe: rebuild it from the
+            // same sky / ground colours, with more light from above than below, so nothing goes black
+            var probe = new SphericalHarmonicsL2();
+            probe.AddAmbientLight(Color.Lerp(ambGround, ambSky, 0.55f) * 1.15f);
+            probe.AddDirectionalLight(Vector3.up, (ambSky - ambGround) * 0.6f, 1f);
+            RenderSettings.ambientProbe = probe;
 
             // Sky shader
             Shader.SetGlobalVector(SunDirId, sunDir);
@@ -198,13 +212,27 @@ namespace Dala
             RenderSettings.fogEndDistance = Mathf.Lerp(view * 1.05f, 60f, Mathf.Clamp01(Overcast * 0.5f + FogDensityBoost));
             if (cam != null) cam.backgroundColor = horizon;
 
+            // Under water: short green-blue fog so the lake bed, weeds and fish fade into murky depth
+            if (cam != null && World.Instance != null)
+            {
+                var cp = cam.transform.position;
+                if (World.Instance.GetBlock(Mathf.FloorToInt(cp.x), Mathf.FloorToInt(cp.y), Mathf.FloorToInt(cp.z)) == BlockType.Water)
+                {
+                    var deep = Color.Lerp(new Color(0.03f, 0.08f, 0.12f), new Color(0.12f, 0.36f, 0.42f), day);
+                    RenderSettings.fogColor = deep;
+                    RenderSettings.fogStartDistance = 0.5f;
+                    RenderSettings.fogEndDistance = 18f;
+                    cam.backgroundColor = deep;
+                }
+            }
+
             if (colorAdj != null)
             {
                 colorAdj.postExposure.value = Mathf.Lerp(0.9f, 0.45f, day) - Overcast * 0.1f;
-                colorAdj.saturation.value = Mathf.Lerp(-10f, 12f, day) - Overcast * 18f;
-                colorAdj.colorFilter.value = Color.Lerp(new Color(0.75f, 0.82f, 1f), Color.Lerp(Color.white, new Color(1f, 0.9f, 0.8f), sunset * 0.6f), day);
+                colorAdj.saturation.value = Mathf.Lerp(-10f, 20f, day) - Overcast * 22f;
+                colorAdj.colorFilter.value = Color.Lerp(new Color(0.85f, 0.9f, 1f), Color.Lerp(Color.white, new Color(1f, 0.9f, 0.8f), sunset * 0.6f), day);
             }
-            if (bloom != null) bloom.intensity.value = Mathf.Lerp(0.6f, 0.95f, day) + sunset * 0.4f;
+            if (bloom != null) bloom.intensity.value = Mathf.Lerp(0.6f, 1.2f, day) + sunset * 0.5f;
         }
     }
 }

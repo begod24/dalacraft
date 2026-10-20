@@ -65,7 +65,7 @@ namespace Dala
     }
 
     /// <summary>Wandering / grazing / fleeing / hunting animal AI. Horses and camels can be ridden (E).</summary>
-    public class Animal : MonoBehaviour
+    public class Animal : MonoBehaviour, IHittable
     {
         public static readonly List<Animal> All = new();
         public Species Sp;
@@ -83,24 +83,48 @@ namespace Dala
         public bool HasRider { get; private set; }
         float health = -1f;
 
-        /// <summary>Player hits the animal. Returns true if it died (drops go straight to the inventory).</summary>
+        float invuln;
+        Vector3 push;
+
+        // ---- IHittable
+        public CreatureKind Kind => CreatureKind.Animal;
+        public string DisplayName => Names.TryGetValue(Sp.Name, out var n) ? n : Sp.Name;
+        public float Health => health < 0 ? Sp.Health : health;
+        public float MaxHealth => Sp.Health;
+        public bool Alive => this != null && Health > 0;
+        public void TakeHit(float damage, Vector3 from, bool crit) => Hurt(damage, from);
+
+        static readonly Dictionary<string, string> Names = new()
+        {
+            ["Horse"] = "Ат (конь)", ["Camel"] = "Түйе (верблюд)", ["Cow"] = "Сиыр (корова)", ["Sheep"] = "Қой (овца)", ["Goat"] = "Ешкі (коза)",
+            ["Kulan"] = "Құлан", ["Saiga"] = "Ақбөкен (сайгак)", ["Hare"] = "Қоян (заяц)", ["Marmot"] = "Суыр (сурок)", ["Jerboa"] = "Қосаяқ (тушканчик)",
+            ["Lizard"] = "Кесіртке (ящерица)", ["Tortoise"] = "Тасбақа (черепаха)", ["Snake"] = "Сұр жылан (гадюка)", ["Wolf"] = "Қасқыр (волк)",
+            ["Fox"] = "Түлкі (лиса)", ["SnowLeopard"] = "Ілбіс (ирбис)", ["Berkut"] = "Бүркіт", ["Duck"] = "Үйрек (утка)", ["Fish"] = "Сазан",
+        };
+
+        /// <summary>Player hits the animal. Returns true if it died (loot drops on the ground).</summary>
         public bool Hurt(float dmg, Vector3 from)
         {
+            if (invuln > 0) return false;
+            invuln = 0.5f;
             if (health < 0) health = Sp.Health;
             health -= dmg;
+            HitFlash.On(gameObject);
             Vector3 away = transform.position - from; away.y = 0;
+            push = away.normalized * 7f;
             heading = Mathf.Atan2(away.x, away.z) * Mathf.Rad2Deg;
             if (Sp.Kind != Behaviour.Predator) { mode = Mode.Flee; modeTimer = 5f; }
             else { mode = Mode.Chase; modeTimer = 8f; }
-            vy = 4f;
+            vy = 5f;
             if (health > 0) return false;
             var pc = PlayerController.Instance;
             if (pc != null)
             {
                 var rng = new System.Random();
-                foreach (var d in Sp.Drops) { int n = rng.Next(d.min, d.max + 1); if (n > 0) pc.Inventory.Add(d.id, n); }
+                foreach (var d in Sp.Drops) { int n = rng.Next(d.min, d.max + 1); if (n > 0) ItemDrop.Spawn(new Stack(d.id, n), transform.position + Vector3.up * 0.5f); }
                 pc.Stats.AddXp(Sp.AttackDamage > 0 ? 5 : 2);
             }
+            Vfx.Puff(transform.position + Vector3.up * Sp.Height * 0.5f, new Color(0.92f, 0.92f, 0.92f, 0.9f), 16, Mathf.Clamp(Sp.Height * 0.4f, 0.2f, 0.6f), 1.5f);
             if (HasRider && pc != null && pc.Riding == this) pc.ForceDismount();
             Destroy(gameObject);
             return true;
@@ -160,6 +184,7 @@ namespace Dala
             var w = World.Instance;
             if (w == null) return;
             float dt = Time.deltaTime;
+            invuln -= dt;
             var player = PlayerController.Instance != null ? PlayerController.Instance.transform : null;
 
             // despawn far away (never the ridden one)
@@ -209,7 +234,8 @@ namespace Dala
             }
             speed = Mathf.MoveTowards(speed, target, (HasRider ? 9f : 6f) * dt);
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, heading, 0), dt * 6f);
-            Vector3 move = transform.forward * speed;
+            Vector3 move = transform.forward * speed + push;
+            push = Vector3.MoveTowards(push, Vector3.zero, dt * 20f);
             if (cc.isGrounded)
             {
                 if (vy < 0) vy = -2f;
@@ -255,7 +281,7 @@ namespace Dala
                     if (mode == Mode.Attack)
                     {
                         attackCooldown = 1.6f; modeTimer = 0.7f;
-                        PlayerController.Instance?.Stats.Damage(Sp.AttackDamage);
+                        PlayerController.Instance?.Stats.Damage(Sp.AttackDamage, transform.position);
                     }
                 }
                 else if (mode != Mode.Attack || modeTimer <= 0) mode = Mode.Chase;
@@ -325,11 +351,24 @@ namespace Dala
         {
             modeTimer -= dt;
             if (modeTimer <= 0) { heading += Random.Range(-120f, 120f); modeTimer = Random.Range(2f, 5f); speed = Random.Range(0.3f, Sp.Walk); }
+            var pc = PlayerController.Instance;
+            if (pc != null)
+            {
+                var away = transform.position - pc.transform.position; away.y = 0;
+                if (away.sqrMagnitude < 16f)   // the whole school scatters when someone wades in
+                {
+                    heading = Mathf.Atan2(away.x, away.z) * Mathf.Rad2Deg + Random.Range(-25f, 25f);
+                    speed = Sp.Run; modeTimer = 1.2f;
+                }
+            }
             Vector3 next = transform.position + Quaternion.Euler(0, heading, 0) * Vector3.forward * 0.8f;
             if (w.GetBlock(Mathf.FloorToInt(next.x), Mathf.FloorToInt(next.y), Mathf.FloorToInt(next.z)) != BlockType.Water) { heading += 170f; speed *= 0.5f; }
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, heading, 0), dt * 4f);
             var p = transform.position + transform.forward * speed * dt;
-            p.y = Mathf.Lerp(p.y, TerrainGenerator.SeaLevel - 0.9f + Mathf.Sin(Time.time * 0.6f + home.z) * 0.4f, dt);
+            // swim mid-water: between the bed and half a block under the surface
+            int bed = w.SurfaceY(Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z)) + 1;
+            float mid = Mathf.Min((bed + TerrainGenerator.SeaLevel + 1f) * 0.5f, TerrainGenerator.SeaLevel + 0.4f);
+            p.y = Mathf.Lerp(p.y, Mathf.Max(bed + 0.25f, mid + Mathf.Sin(Time.time * 0.6f + home.z) * 0.3f), dt);
             transform.position = p;
             anim?.Play("Swim", 0.2f, Mathf.Clamp(speed / Sp.AnimWalk, 0.5f, 2f));
         }

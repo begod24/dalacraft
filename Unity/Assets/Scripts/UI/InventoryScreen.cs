@@ -10,7 +10,7 @@ namespace Dala
     /// </summary>
     public class InventoryScreen : MonoBehaviour
     {
-        public enum Mode { Player, Workbench, Furnace, Chest }
+        public enum Mode { Player, Workbench, Furnace, Chest, Kazan }
         public static InventoryScreen Instance { get; private set; }
         public bool IsOpen => panelRoot != null && panelRoot.gameObject.activeSelf;
 
@@ -24,13 +24,14 @@ namespace Dala
         int craftW = 2;
         Inventory output = new(1);
         readonly List<SlotView> views = new();
-        UnityEngine.UI.Image furnaceArrow, furnaceFlame;
+        UnityEngine.UI.Image furnaceArrow, furnaceFlame, waterFill;
+        UnityEngine.UI.Text kazanHint;
         int creativePage;
 
         class SlotView : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
         {
             public InventoryScreen Owner; public Inventory Inv; public int Index; public bool TakeOnly, IsCraftOutput, IsCreative; public int CreativeId;
-            public UnityEngine.UI.Image Icon; public UnityEngine.UI.Text Count;
+            public UnityEngine.UI.Image Icon, Wear; public UnityEngine.UI.Text Count;
             public void OnPointerClick(PointerEventData e) => Owner.Click(this, e.button == PointerEventData.InputButton.Right);
             public void OnPointerEnter(PointerEventData e) => Owner.Hover(this);
             public void OnPointerExit(PointerEventData e) => Owner.Hover(null);
@@ -55,7 +56,9 @@ namespace Dala
         // ------------------------------------------------------------------ open / close
         public void Open(Mode m, BlockEntity e = null)
         {
+            if (entity != null) entity.Viewers = Mathf.Max(0, entity.Viewers - 1);
             mode = m; entity = e;
+            if (e != null) e.Viewers++;          // opens the chest lid
             craftW = m == Mode.Workbench ? 3 : 2;
             craft = new Inventory(craftW * craftW);
             craft.Changed += UpdateCraftOutput;
@@ -71,14 +74,15 @@ namespace Dala
             foreach (var s in craft.Slots) if (!s.IsEmpty) Give(s);
             if (!cursor.IsEmpty) Give(cursor);
             cursor = Stack.Empty;
+            if (entity != null) { entity.Viewers = Mathf.Max(0, entity.Viewers - 1); entity = null; }
             panelRoot.gameObject.SetActive(false);
             tooltip.text = "";
         }
 
         void Give(Stack s)
         {
-            int left = pc.Inventory.Add(s.Id, s.Count);
-            if (left > 0) Hud.Instance?.ShowMessage("Инвентарь полон");
+            int left = pc.Inventory.Add(s);
+            if (left > 0) { ItemDrop.Spawn(s.WithCount(left), pc.transform.position + Vector3.up * 1.4f, pc.transform.forward * 2f); Hud.Instance?.ShowMessage("Инвентарь полон"); }
         }
 
         // ------------------------------------------------------------------ layout
@@ -88,7 +92,11 @@ namespace Dala
             views.Clear();
             bool creative = Session.Creative && mode == Mode.Player;
             var panel = UiKit.Panel(content, new Vector2(620, 720), new Vector2(creative ? 330 : 0, 0)).rectTransform;
-            string title = mode switch { Mode.Workbench => "Верстак", Mode.Furnace => "Печь", Mode.Chest => "Сандык", _ => "Инвентарь" };
+            string title = mode switch
+            {
+                Mode.Workbench => "Верстак", Mode.Furnace => entity?.Type == BlockType.Tandyr ? "Тандыр" : "Печь",
+                Mode.Chest => entity?.Type == BlockType.Kebeje ? "Кебеже" : "Сандык", Mode.Kazan => "Қазан", _ => "Инвентарь",
+            };
             var tr = UiKit.Center("Title", panel, new Vector2(560, 50), new Vector2(0, 318)); UiKit.Text(tr, title, 34, UiKit.Ink, TextAnchor.MiddleCenter, false);
 
             // player inventory: rows of 9 (slots 9..35), hotbar (0..8)
@@ -123,9 +131,29 @@ namespace Dala
                     break;
                 }
                 case Mode.Chest:
-                    for (int r = 0; r < 3; r++)
-                        for (int col = 0; col < 9; col++) Slot(panel, entity.Storage, r * 9 + col, new Vector2(-240 + col * 60, 250 - r * 60));
+                {
+                    int rows = entity.Storage.Size / 9;
+                    for (int r = 0; r < rows; r++)
+                        for (int col = 0; col < 9; col++) Slot(panel, entity.Storage, r * 9 + col, new Vector2(-240 + col * 60, 250 - r * 60 - (3 - rows) * 30));
                     break;
+                }
+                case Mode.Kazan:
+                {
+                    // 2x2 pot, water gauge, fire + fuel, arrow, dish
+                    for (int i = 0; i < 4; i++) Slot(panel, entity.Storage, i, new Vector2(-190 + (i % 2) * 60, 270 - (i / 2) * 60));
+                    Slot(panel, entity.Storage, 4, new Vector2(-160, 100));
+                    var fl = UiKit.Center("Flame", panel, new Vector2(36, 36), new Vector2(-160, 160)); furnaceFlame = UiKit.Image(fl, "UI_HungerFull", new Color(1f, 0.55f, 0.1f));
+                    var wb = UiKit.Center("Water", panel, new Vector2(22, 120), new Vector2(-260, 240)); UiKit.Image(wb, null, new Color(0.1f, 0.1f, 0.15f, 0.8f));
+                    var wf = UiKit.Rect("Fill", wb, Vector2.zero, new Vector2(1, 0), new Vector2(0.5f, 0), Vector2.zero, Vector2.zero);
+                    waterFill = UiKit.Image(wf, null, new Color(0.25f, 0.55f, 0.95f));
+                    var ar = UiKit.Center("Arrow", panel, new Vector2(72, 51), new Vector2(10, 240)); UiKit.Image(ar, "UI_CraftArrow", new Color(1, 1, 1, 0.3f));
+                    var af = UiKit.Center("ArrowFill", panel, new Vector2(72, 51), new Vector2(10, 240)); furnaceArrow = UiKit.Image(af, "UI_CraftArrow");
+                    furnaceArrow.type = UnityEngine.UI.Image.Type.Filled; furnaceArrow.fillMethod = UnityEngine.UI.Image.FillMethod.Horizontal;
+                    var o = Slot(panel, entity.Storage, 5, new Vector2(120, 240)); o.TakeOnly = true;
+                    var hint = UiKit.Center("Hint", panel, new Vector2(330, 120), new Vector2(110, 120));
+                    kazanHint = UiKit.Text(hint, "", 20, UiKit.Ink, TextAnchor.UpperLeft, false);
+                    break;
+                }
             }
             if (creative) BuildCreative();
         }
@@ -157,6 +185,7 @@ namespace Dala
             v.Owner = this; v.Inv = inv; v.Index = index;
             var ic = UiKit.Center("Icon", rt, new Vector2(42, 42)); v.Icon = UiKit.Image(ic, null);
             v.Count = UiKit.Text(rt, "", 24, Color.white, TextAnchor.LowerRight); v.Count.rectTransform.offsetMax = new Vector2(-4, 2);
+            v.Wear = Hud.WearBar(rt);
             views.Add(v);
             return v;
         }
@@ -182,14 +211,16 @@ namespace Dala
                 if (inv == pc.Inventory)
                 {
                     int left = slot.Count;
-                    if (entity != null && entity.Storage != null && mode == Mode.Chest) left = entity.Storage.Add(slot.Id, slot.Count);
-                    else if (mode == Mode.Furnace && Smelting.Results.ContainsKey(slot.Id)) left = entity.Storage.Add(slot.Id, slot.Count, 0, 1);
-                    else if (mode == Mode.Furnace && Smelting.Fuel(slot.Id) > 0) left = entity.Storage.Add(slot.Id, slot.Count, 1, 2);
-                    else left = i < 9 ? pc.Inventory.Add(slot.Id, slot.Count, 9, 36) : pc.Inventory.Add(slot.Id, slot.Count, 0, 9);
+                    var recipes = entity?.Type == BlockType.Tandyr ? Smelting.Baking : Smelting.Results;
+                    if (entity != null && entity.Storage != null && mode == Mode.Chest) left = entity.Storage.Add(slot);
+                    else if (mode == Mode.Furnace && recipes.ContainsKey(slot.Id)) left = entity.Storage.Add(slot, 0, 1);
+                    else if ((mode == Mode.Furnace || mode == Mode.Kazan) && Smelting.Fuel(slot.Id) > 0) left = entity.Storage.Add(slot, mode == Mode.Kazan ? 4 : 1, mode == Mode.Kazan ? 5 : 2);
+                    else if (mode == Mode.Kazan) left = KazanAdd(slot);
+                    else left = i < 9 ? pc.Inventory.Add(slot, 9, 36) : pc.Inventory.Add(slot, 0, 9);
                     if (left == slot.Count) return;
-                    inv[i] = new Stack(slot.Id, left);
+                    inv[i] = slot.WithCount(left);
                 }
-                else { int left = pc.Inventory.Add(slot.Id, slot.Count); inv[i] = new Stack(slot.Id, left); }
+                else { int left = pc.Inventory.Add(slot); inv[i] = slot.WithCount(left); }
                 return;
             }
 
@@ -224,6 +255,14 @@ namespace Dala
                     cursor.Count--; if (cursor.Count <= 0) cursor = Stack.Empty;
                 }
             }
+        }
+
+        /// <summary>Shift-click into the kazan: one ingredient per pot slot (a recipe needing two meat uses two slots).</summary>
+        int KazanAdd(Stack s)
+        {
+            for (int i = 0; i < 4; i++)
+                if (entity.Storage[i].IsEmpty) { entity.Storage[i] = s.WithCount(1); return s.Count - 1; }
+            return entity.Storage.Add(s, 0, 4);
         }
 
         void TakeCraft(bool all)
@@ -271,6 +310,7 @@ namespace Dala
                 v.Icon.enabled = !s.IsEmpty;
                 if (!s.IsEmpty) v.Icon.sprite = s.Def?.Icon;
                 v.Count.text = !s.IsEmpty && s.Count > 1 && !v.IsCreative ? s.Count.ToString() : "";
+                Hud.UpdateWear(v.Wear, s);
             }
             var mouse = UnityEngine.InputSystem.Mouse.current.position.ReadValue();
             RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRt, mouse, null, out var local);
@@ -279,10 +319,17 @@ namespace Dala
             if (!cursor.IsEmpty) cursorIcon.sprite = cursor.Def?.Icon;
             cursorCount.text = cursor.Count > 1 ? cursor.Count.ToString() : "";
             ((RectTransform)tooltip.transform).anchoredPosition = local + new Vector2(270, 40);
-            if (mode == Mode.Furnace && entity != null && furnaceArrow != null)
+            if ((mode == Mode.Furnace || mode == Mode.Kazan) && entity != null && furnaceArrow != null)
             {
-                furnaceArrow.fillAmount = entity.Progress / Smelting.SmeltTime;
+                furnaceArrow.fillAmount = entity.Progress / (mode == Mode.Kazan ? Cooking.CookTime : Smelting.SmeltTime);
                 furnaceFlame.color = new Color(1f, 0.55f, 0.1f, entity.BurnMax > 0 ? Mathf.Clamp01(entity.Burn / entity.BurnMax) : 0.15f);
+            }
+            if (mode == Mode.Kazan && entity != null && waterFill != null)
+            {
+                ((RectTransform)waterFill.transform).anchorMax = new Vector2(1, entity.Water / (float)BlockEntity.MaxWater);
+                var dish = Cooking.Match(entity.Storage, entity.Water);
+                kazanHint.text = (entity.Water == 0 ? "Залей воду: ПКМ шелеком с водой\n" : $"Вода: {entity.Water}/{BlockEntity.MaxWater}\n") +
+                                 (dish != null ? $"Варится: {dish.Result.Def?.Name}" : "Сорпа: мясо + кесе + вода\nБешбармак: 2 мяса + нан + кесе + вода\nҚуырдақ: 2 мяса + кесе\nБауырсаки: 2 нана");
             }
         }
     }

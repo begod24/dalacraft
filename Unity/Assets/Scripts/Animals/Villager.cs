@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Dala
 {
     /// <summary>Aul resident (Blender model Resources/Models/NPC/*.fbx): wanders near home, works, greets and talks to the player.</summary>
-    public class Villager : MonoBehaviour
+    public class Villager : MonoBehaviour, IHittable
     {
         public static readonly List<Villager> All = new();
         public string Kind;
@@ -29,6 +29,35 @@ namespace Dala
             ["Batyr"] = new[] { "Ел қорғаны — батыр! Защищаю аул от волков.", "В горах бродит ирбис — будь осторожен.", "Ешқашан берілме! Никогда не сдавайся!" },
             ["Shepherd"] = new[] { "Отара цела, волки не подходили.", "Ночью волки воют на луну — не ходи один в степь." },
         };
+
+        // ---- IHittable: residents can be hurt; the batyr defends the aul against whoever hits its people
+        float health = 20f, invuln, angry;
+        Vector3 push;
+        CreatureKind IHittable.Kind => CreatureKind.Villager;
+        public string DisplayName => Kind switch
+        {
+            "Aksakal" => "Ақсақал", "Apa" => "Апа", "Kyz" => "Қыз", "Bala" => "Бала", "Merchant" => "Саудагер", "Blacksmith" => "Ұста",
+            "Batyr" => "Батыр", "Shepherd" => "Шопан", _ => Kind,
+        };
+        public float Health => health;
+        public float MaxHealth => 20f;
+        public bool Alive => this != null && health > 0;
+
+        public void TakeHit(float damage, Vector3 from, bool crit)
+        {
+            if (invuln > 0 || health <= 0) return;
+            invuln = 0.5f;
+            health -= damage;
+            HitFlash.On(gameObject);
+            var away = transform.position - from; away.y = 0;
+            push = away.normalized * 6f; vy = 4f;
+            Hud.Instance?.ShowMessage($"{DisplayName}: Ай! Неге ұрасың?! (За что?!)", 2f);
+            foreach (var v in All) if (v.Kind == "Batyr" && (v.transform.position - transform.position).sqrMagnitude < 40 * 40) v.angry = 40f;
+            if (Kind == "Batyr") angry = 40f;
+            if (health > 0) { mode = Mode.Walk; timer = 3f; heading = Mathf.Atan2(away.x, away.z) * Mathf.Rad2Deg; return; }
+            Vfx.Puff(transform.position + Vector3.up * 0.9f, new Color(0.92f, 0.92f, 0.92f, 0.9f), 18, 0.4f, 1.4f);
+            Destroy(gameObject);
+        }
 
         public static Villager Spawn(string kind, Vector3 pos)
         {
@@ -94,7 +123,18 @@ namespace Dala
             }
 
             timer -= dt;
-            if (mode != Mode.Talk && player != null)
+            invuln -= dt;
+            if (angry > 0 && player != null && !player.Stats.Dead && Kind == "Batyr")
+            {
+                // an angry batyr runs at the player and strikes with his spear
+                angry -= dt;
+                Vector3 to = player.transform.position - transform.position; to.y = 0;
+                heading = Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg;
+                mode = Mode.Walk; timer = 0.5f;
+                if (to.magnitude < 2.2f && talkTimer <= 0) { player.Stats.Damage(4f, transform.position); talkTimer = 1.2f; anim?.PlayOnce("Work"); }
+                talkTimer -= dt;
+            }
+            else if (mode != Mode.Talk && player != null)
             {
                 float d = Vector3.Distance(player.transform.position, transform.position);
                 talkTimer -= dt;
@@ -109,10 +149,11 @@ namespace Dala
                     heading = toHome.magnitude > 10f ? Mathf.Atan2(toHome.x, toHome.z) * Mathf.Rad2Deg : heading + Random.Range(-120f, 120f); }
                 else { mode = Mode.Idle; timer = Random.Range(2f, 5f); }
             }
-            float target = mode == Mode.Walk ? 1.3f : 0f;
+            float target = mode == Mode.Walk ? (angry > 0 ? 4.5f : 1.3f) : 0f;
             speed = Mathf.MoveTowards(speed, target, dt * 4f);
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, heading, 0), dt * 5f);
-            var move = transform.forward * speed;
+            var move = transform.forward * speed + push;
+            push = Vector3.MoveTowards(push, Vector3.zero, dt * 20f);
             if (cc.isGrounded) { if (vy < 0) vy = -2; if ((cc.collisionFlags & CollisionFlags.Sides) != 0 && speed > 0.5f) heading += 120f; }
             vy -= 20f * dt; move.y = vy;
             cc.Move(move * dt);
@@ -120,7 +161,7 @@ namespace Dala
             if (anim == null) return;
             if (mode == Mode.Talk) anim.Play("Talk", 0.3f);
             else if (mode == Mode.Work) anim.Play("Work", 0.3f);
-            else if (speed > 0.2f) anim.Play("Walk", 0.25f, speed / 1.3f);
+            else if (speed > 0.2f) anim.Play("Walk", 0.25f, Mathf.Min(speed / 1.3f, 2.5f));
             else anim.Play("Idle", 0.4f);
             anim.Tick(dt);
         }

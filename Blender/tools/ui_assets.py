@@ -106,7 +106,7 @@ im.save('UI_XpBarFill')
 im = Img(9, 9)
 for i in range(9):
     if i != 4: im.px(i, 4, WHITE); im.px(4, i, WHITE)
-im.px(4, 4, GOLD); im.save('UI_Crosshair')
+im.px(4, 4, WHITE); im.save("UI_Crosshair")   # drawn with Dala/UIInvert like Minecraft
 
 # ---------------- buttons (9-slice: border 6) ----------------
 def button(name, fill, border, text_glow):

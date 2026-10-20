@@ -165,6 +165,7 @@ namespace Dala
             UiKit.Toggle(panel, "Трава качается на ветру", GameSettings.GrassWind, new Vector2(rx, 105), v => GameSettings.GrassWind = v);
             UiKit.Toggle(panel, "Полный экран", GameSettings.Fullscreen, new Vector2(rx, 35), v => GameSettings.Fullscreen = v);
             UiKit.Toggle(panel, "Вертикальная синхронизация", GameSettings.VSync, new Vector2(rx, -35), v => GameSettings.VSync = v);
+            UiKit.Toggle(panel, "Автопрыжок на блок", GameSettings.AutoJump, new Vector2(rx, -105), v => GameSettings.AutoJump = v);
             var hint = UiKit.Center("Controls", panel, new Vector2(1300, 140), new Vector2(0, -215));
             UiKit.Text(hint, "WASD — ходьба · Space — прыжок · Shift — бег · E — инвентарь · F — сесть на коня/верблюда · ПКМ — использовать/поставить\n" +
                              "ЛКМ (держать) — ломать/бить · 1-9/колесо — слот · Q — выбросить · F5 — вид · F6 — погода · F3 — отладка · Esc — пауза", 24, UiKit.Ink, TextAnchor.MiddleCenter, false);

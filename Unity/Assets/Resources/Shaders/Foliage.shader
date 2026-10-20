@@ -49,6 +49,7 @@ Shader "Dala/Foliage"
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fog
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "DalaLight.hlsl"
 
             struct Attributes { float4 pos : POSITION; float2 uv : TEXCOORD0; UNITY_VERTEX_INPUT_INSTANCE_ID };
             struct Varyings { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float3 posWS : TEXCOORD1; half h : TEXCOORD2; half fog : TEXCOORD3; };
@@ -76,7 +77,8 @@ Shader "Dala/Foliage"
                 half ao = lerp(0.55, 1, saturate(i.h * 1.6));
                 half3 ambient = lerp(_AmbientGround.rgb, _AmbientSky.rgb, 0.75);
                 half direct = (0.65 + 0.35 * saturate(sun.direction.y)) * sun.shadowAttenuation;
-                half3 c = tex.rgb * (ambient * ao + sun.color * direct * ao);
+                half blockL = max(PointLevel(i.posWS), HandLevel(i.posWS));
+                half3 c = tex.rgb * (ambient * ao + sun.color * direct * ao + BlockLightTerm(blockL) * ao * 2.0 + 0.03);
                 c += tex.rgb * sun.color * 0.12 * i.h;      // light through the blades
                 return half4(MixFog(c, i.fog), 1);
             }

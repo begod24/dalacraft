@@ -137,7 +137,8 @@ def build_human(name, spec, coll):
         for x in (0.22, -0.22): box('Head', (x, 0.03, 1.48), (0.06, 0.30, 0.34), A(T['HatSide']))
         box('Head', (0, 0.22, 1.50), (0.44, 0.06, 0.36), A(T['HatSide']))
     elif hat == 'kimeshek':   # white headdress + turban-like top
-        box('Head', (0, 0.02, 1.47), (0.44, 0.44, 0.46), tl(T['HatTop'], T['HatTop'], T['Face'], T['HeadBack'], T['HeadSide'], T['HeadSide']))
+        # cloth wraps sides/top/back; its front sits 2 cm behind the face so the two never share a plane (z-fighting)
+        box('Head', (0, 0.04, 1.47), (0.44, 0.44, 0.46), tl(T['HatTop'], T['HatTop'], T['HeadBack'], T['HeadBack'], T['HeadSide'], T['HeadSide']))
         box('Head', (0, 0, 1.73), (0.46, 0.46, 0.14), A(T['HatSide']))
         box('Head', (0, 0.08, 1.20), (0.46, 0.40, 0.14), A(T['HeadBack']))
     elif hat == 'duly':       # warrior helmet with spike & aventail

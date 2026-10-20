@@ -66,5 +66,66 @@ namespace Dala
                       new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(peak, inTime), new GradientAlphaKey(peak, outTime), new GradientAlphaKey(0f, 1f) });
             return new ParticleSystem.MinMaxGradient(g);
         }
+
+        static readonly System.Collections.Generic.Dictionary<int, Material> blockMats = new();
+
+        /// <summary>Material showing one block tile of its atlas page (for break fragments).</summary>
+        static Material BlockTile(int tile)
+        {
+            if (blockMats.TryGetValue(tile, out var m) && m != null) return m;
+            m = Material(BlockAtlas.PageOf(tile), false, 1f);
+            int slot = tile % BlockInfo.TilesPerPage;
+            const float k = 1f / BlockInfo.AtlasTiles;
+            m.SetTextureScale("_BaseMap", new Vector2(k, k));
+            m.SetTextureOffset("_BaseMap", new Vector2((slot % BlockInfo.AtlasTiles) * k, (slot / BlockInfo.AtlasTiles) * k));
+            blockMats[tile] = m;
+            return m;
+        }
+
+        /// <summary>Minecraft-like burst of small pieces of the block's own texture when it breaks.</summary>
+        public static void BlockBreak(Vector3Int cell, BlockType b)
+        {
+            if (!Application.isPlaying || b == BlockType.Air) return;
+            int tile = BlockInfo.IsEntity(b) ? BlockInfo.TilePlanks : BlockInfo.Tile(b, 2);
+            if (b == BlockType.Furnace || b == BlockType.Kazan || b == BlockType.Tandyr) tile = BlockInfo.TileCobble;
+            if (b == BlockType.Torch || b == BlockType.Campfire) tile = BlockInfo.TileWood;
+            var ps = Create("BreakBits", null, BlockTile(tile), 40);
+            ps.transform.position = cell + new Vector3(0.5f, 0.5f, 0.5f);
+            var main = ps.main;
+            main.loop = false; main.duration = 0.2f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.5f, 1.0f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.8f, 2.6f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.07f, 0.13f);
+            main.gravityModifier = 1.6f;
+            main.startColor = new Color(0.85f, 0.85f, 0.85f, 1f);
+            main.stopAction = ParticleSystemStopAction.Destroy;
+            var em = ps.emission; em.rateOverTime = 0; em.SetBursts(new[] { new ParticleSystem.Burst(0f, 28) });
+            var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Box; sh.scale = Vector3.one * 0.8f;
+            // each fragment shows a random 4x4-pixel piece of the 16px tile
+            var ts = ps.textureSheetAnimation; ts.enabled = true; ts.numTilesX = 4; ts.numTilesY = 4;
+            ts.frameOverTime = new ParticleSystem.MinMaxCurve(0f); ts.startFrame = new ParticleSystem.MinMaxCurve(0f, 15.99f);
+            var col = ps.collision; col.enabled = true; col.type = ParticleSystemCollisionType.World; col.dampen = 0.5f; col.bounce = 0.2f; col.radiusScale = 0.5f;
+            ps.Play();
+        }
+
+        /// <summary>A puff of tinted particles (hits, deaths, spirits).</summary>
+        public static void Puff(Vector3 at, Color c, int count = 14, float size = 0.25f, float speed = 1.6f, int tile = Smoke)
+        {
+            if (!Application.isPlaying) return;
+            var ps = Create("Puff", null, Tile(tile, false), count + 4);
+            ps.transform.position = at;
+            var main = ps.main;
+            main.loop = false; main.duration = 0.1f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.4f, 0.9f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(speed * 0.4f, speed);
+            main.startSize = new ParticleSystem.MinMaxCurve(size * 0.6f, size);
+            main.startColor = c;
+            main.gravityModifier = -0.15f;
+            main.stopAction = ParticleSystemStopAction.Destroy;
+            var em = ps.emission; em.rateOverTime = 0; em.SetBursts(new[] { new ParticleSystem.Burst(0f, (short)count) });
+            var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Sphere; sh.radius = 0.3f;
+            var col = ps.colorOverLifetime; col.enabled = true; col.color = Fade(c, 0.05f, 0.5f);
+            ps.Play();
+        }
     }
 }

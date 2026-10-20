@@ -102,6 +102,9 @@ namespace Dala
 
             var ui = new GameObject("UI"); ui.transform.SetParent(root);
             ui.AddComponent<Hud>().Init(pc);
+            BlockHighlight.Create(root);
+            CreatureHearts.Create(root);
+            new GameObject("Mobs").AddComponent<MobSpawner>().transform.SetParent(root);
             ui.AddComponent<InventoryScreen>().Init(pc);
             ui.AddComponent<PauseMenu>().Init();
             GameSettings.Apply();

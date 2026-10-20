@@ -22,20 +22,36 @@ namespace Dala
 
         public void AddExhaustion(float e) { if (!Session.Creative) exhaustion += e; }
 
-        public void Damage(float amount)
+        float invuln;
+        float tiltSign = 1f;
+        /// <summary>Camera roll right after a hit (Minecraft's hurt shake).</summary>
+        public float HurtTilt => Mathf.Sin(Mathf.Clamp01(HurtFlash / 0.35f) * Mathf.PI) * 6f * tiltSign;
+
+        /// <summary>Hurts the player; <paramref name="from"/> (attacker position) also knocks them back.</summary>
+        public void Damage(float amount, Vector3? from = null)
         {
-            if (Dead || Session.Creative || amount <= 0) return;
+            if (Dead || Session.Creative || amount <= 0 || invuln > 0) return;
+            invuln = 0.5f;
             amount *= 1f - Mathf.Min(Armor, 20) * 0.04f;
             Health = Mathf.Max(0, Health - amount);
             HurtFlash = 0.35f;
+            tiltSign = Random.value < 0.5f ? -1f : 1f;
+            if (from.HasValue) GetComponent<PlayerController>()?.Knockback(from.Value);
             if (Health <= 0) { Dead = true; Died?.Invoke(); }
         }
+
+        public void Heal(float amount) { if (!Dead) Health = Mathf.Min(MaxHealth, Health + amount); }
+
+        /// <summary>Seconds left burning (a shaitan's touch): 1 damage per second, water puts it out.</summary>
+        public float Burning { get; private set; }
+        float burnTick;
+        public void SetOnFire(float seconds) { if (!Session.Creative) Burning = Mathf.Max(Burning, seconds); }
 
         public bool Eat(ItemDef food)
         {
             if (food == null || food.Food <= 0 || Hunger >= MaxHunger) return false;
             Hunger = Mathf.Min(MaxHunger, Hunger + food.Food);
-            Saturation = Mathf.Min(Hunger, Saturation + food.Food * 0.6f);
+            Saturation = Mathf.Min(Hunger, Saturation + food.Food * 0.6f + food.Saturation * 0.5f);
             return true;
         }
 
@@ -53,6 +69,7 @@ namespace Dala
         void Update()
         {
             HurtFlash = Mathf.Max(0, HurtFlash - Time.deltaTime);
+            invuln -= Time.deltaTime;
             if (Dead || Session.Creative || cc == null) { Air = MaxAir; return; }
             float dt = Time.deltaTime;
 
@@ -78,6 +95,14 @@ namespace Dala
                 }
                 if (!cc.isGrounded && transform.position.y > fallStartY) fallStartY = transform.position.y;
                 wasGrounded = cc.isGrounded;
+            }
+
+            // burning
+            if (Burning > 0)
+            {
+                Burning -= dt; burnTick -= dt;
+                if (InWater(0.5f)) Burning = 0;
+                else if (burnTick <= 0) { burnTick = 1f; invuln = 0; Damage(1f); }
             }
 
             // air / drowning
