@@ -50,6 +50,7 @@ namespace Dala
                 var pc = hit.collider.GetComponentInParent<PlayerController>();
                 var target = Combat.TargetOf(hit.collider);
                 if (pc != null && !byPlayer) { pc.Stats.Damage(damage, from - vel.normalized); Destroy(gameObject); return; }
+                if (!byPlayer && target is Villager v && shooter is Mob sm) { v.HurtBy(sm, damage); Destroy(gameObject); return; }
                 if (target != null && target != shooter && Combat.IsHittable(target) && pc == null)
                 {
                     Combat.Hit(target, damage, from - vel.normalized * 2f, false);

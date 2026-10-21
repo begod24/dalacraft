@@ -59,6 +59,25 @@ namespace Dala
             Destroy(gameObject);
         }
 
+        /// <summary>A night creature hits this resident: no complaint to the player — they run, and batyrs come to fight it.</summary>
+        public void HurtBy(Mob attacker, float damage)
+        {
+            if (invuln > 0 || health <= 0 || attacker == null) return;
+            invuln = 0.5f;
+            health -= damage;
+            HitFlash.On(gameObject);
+            CreatureHearts.Hurt(this);
+            var away = transform.position - attacker.transform.position; away.y = 0;
+            push = away.normalized * 6f; vy = 4f;
+            foreach (var v in All) if (v.Kind == "Batyr" && (v.transform.position - transform.position).sqrMagnitude < 40 * 40) v.foe = attacker;
+            if (Kind == "Batyr") foe = attacker;
+            if (health > 0) { mode = Mode.Walk; timer = 3f; heading = Mathf.Atan2(away.x, away.z) * Mathf.Rad2Deg; return; }
+            Vfx.Puff(transform.position + Vector3.up * 0.9f, new Color(0.92f, 0.92f, 0.92f, 0.9f), 18, 0.4f, 1.4f);
+            Destroy(gameObject);
+        }
+        Mob foe;
+        float fleeCheck;
+
         public static Villager Spawn(string kind, Vector3 pos)
         {
             var go = new GameObject("NPC_" + kind);
@@ -107,6 +126,28 @@ namespace Dala
             Hud.Instance?.ShowMessage(lines[lineIndex++ % lines.Length], 4.5f);
         }
 
+        bool fleeing;
+
+        /// <summary>Residents run from a hostile creature close by (a batyr looks for one to fight instead).</summary>
+        bool FleeFromMobs(float dt)
+        {
+            fleeCheck -= dt;
+            if (fleeCheck > 0) return fleeing;
+            fleeCheck = 0.5f;
+            fleeing = false;
+            foreach (var m in Mob.All)
+            {
+                if (m == null || !m.Hostile) continue;
+                var away = transform.position - m.transform.position; away.y = 0;
+                if (away.sqrMagnitude > 10 * 10) continue;
+                if (Kind == "Batyr") { foe = m; return false; }
+                heading = Mathf.Atan2(away.x, away.z) * Mathf.Rad2Deg;
+                mode = Mode.Walk; timer = 1f; fleeing = true;
+                return true;
+            }
+            return false;
+        }
+
         void Update()
         {
             var w = World.Instance;
@@ -134,6 +175,16 @@ namespace Dala
                 if (to.magnitude < 2.2f && talkTimer <= 0) { player.Stats.Damage(4f, transform.position); talkTimer = 1.2f; anim?.PlayOnce("Work"); }
                 talkTimer -= dt;
             }
+            else if (Kind == "Batyr" && foe != null && foe.Alive && (foe.transform.position - transform.position).sqrMagnitude < 30 * 30)
+            {
+                // the batyr fights night creatures that come to the aul
+                Vector3 to = foe.transform.position - transform.position; to.y = 0;
+                heading = Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg;
+                mode = Mode.Walk; timer = 0.5f; angry = 0f;
+                if (to.magnitude < 2.2f && talkTimer <= 0) { foe.TakeHit(5f, transform.position, false); CreatureHearts.Hurt(foe); talkTimer = 1.1f; anim?.PlayOnce("Work"); }
+                talkTimer -= dt;
+            }
+            else if (FleeFromMobs(dt)) { }
             else if (mode != Mode.Talk && player != null)
             {
                 float d = Vector3.Distance(player.transform.position, transform.position);
@@ -149,7 +200,7 @@ namespace Dala
                     heading = toHome.magnitude > 10f ? Mathf.Atan2(toHome.x, toHome.z) * Mathf.Rad2Deg : heading + Random.Range(-120f, 120f); }
                 else { mode = Mode.Idle; timer = Random.Range(2f, 5f); }
             }
-            float target = mode == Mode.Walk ? (angry > 0 ? 4.5f : 1.3f) : 0f;
+            float target = mode == Mode.Walk ? (angry > 0 || foe != null || fleeing ? 4.5f : 1.3f) : 0f;
             speed = Mathf.MoveTowards(speed, target, dt * 4f);
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0, heading, 0), dt * 5f);
             var move = transform.forward * speed + push;

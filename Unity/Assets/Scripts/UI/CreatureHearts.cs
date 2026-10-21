@@ -10,7 +10,7 @@ namespace Dala
     /// </summary>
     public class CreatureHearts : MonoBehaviour
     {
-        const float ShowRadius = 10f, HitShowTime = 5f, HeartSize = 0.13f, Gap = 0.015f;
+        const float ShowRadius = 16f, HitShowTime = 5f, HeartSize = 0.13f, Gap = 0.015f;
 
         class Row
         {
@@ -61,10 +61,10 @@ namespace Dala
                 row ??= rows[c] = Build(c, h.Kind == CreatureKind.Mob);
                 row.Go.SetActive(true);
                 Layout(row, h);
-                // head height from the model's bounds (refreshed now and then: animations move it a little)
+                // head height above the creature's feet (measured now and then), so the row rides along when it jumps or climbs
                 row.TopTimer -= Time.deltaTime;
-                if (row.TopTimer <= 0) { row.TopTimer = 1f; row.Top = TopOf(c); }
-                row.Go.transform.position = new Vector3(c.transform.position.x, row.Top + 0.35f, c.transform.position.z);
+                if (row.TopTimer <= 0) { row.TopTimer = 2f; row.Top = Mathf.Max(row.Top, TopOf(c) - c.transform.position.y); }
+                row.Go.transform.position = c.transform.position + Vector3.up * (row.Top + 0.35f);
                 row.Go.transform.rotation = Quaternion.LookRotation(row.Go.transform.position - eye);
             }
             // creatures that died or despawned
@@ -77,7 +77,7 @@ namespace Dala
         {
             var row = new Row { Go = new GameObject("Hearts_" + c.name), Mob = mob };
             row.Go.transform.SetParent(transform, false);
-            row.Top = TopOf(c);
+            row.Top = TopOf(c) - c.transform.position.y;
             return row;
         }
 

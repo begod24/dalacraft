@@ -75,7 +75,7 @@ Shader "Dala/VoxelLit"
                 half sunVis = smoothstep(0.55, 0.95, sky);
                 half3 light = ambient * ao * skyF
                             + sun.color * ndl * sun.shadowAttenuation * lerp(0.6, 1, ao) * sunVis
-                            + BlockLightTerm(blockL) * ao * 2.0
+                            + BlockLightTerm(blockL) * ao * 3.0
                             + 0.03 * ao;                                    // never fully black, like Minecraft's minimum
                 half3 c = albedo * light;
                 return half4(MixFog(c, i.fog), 1);

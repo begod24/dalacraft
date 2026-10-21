@@ -12,11 +12,8 @@ namespace Dala
         readonly UnityEngine.UI.Image[] slotIcons = new UnityEngine.UI.Image[9];
         readonly UnityEngine.UI.Text[] slotCounts = new UnityEngine.UI.Text[9];
         readonly UnityEngine.UI.Image[] slotWear = new UnityEngine.UI.Image[9];
-        RectTransform targetPanel, targetFill;
-        UnityEngine.UI.Text targetName, targetKind;
-        UnityEngine.UI.Image targetFillImg, sleepFade;
-        IHittable target;
-        float targetTimer, sleepT = -1f;
+        UnityEngine.UI.Image sleepFade;
+        float sleepT = -1f;
         System.Action onWake;
         bool woke;
         readonly System.Collections.Generic.List<(UnityEngine.UI.Text t, Vector3 world, float age)> numbers = new();
@@ -95,7 +92,6 @@ namespace Dala
             var dbg = UiKit.Rect("Debug", root, new Vector2(0, 1), new Vector2(0, 1), new Vector2(0, 1), new Vector2(16, -16), new Vector2(900, 400));
             debug = UiKit.Text(dbg, "", 24, Color.white, TextAnchor.UpperLeft);
 
-            BuildTargetBar();
             var sf = UiKit.Stretch("SleepFade", root); sleepFade = UiKit.Image(sf, null, new Color(0.02f, 0.02f, 0.06f, 0f));
             sleepFade.raycastTarget = false;
             BuildDeathScreen();
@@ -124,40 +120,11 @@ namespace Dala
             bar.color = Color.HSVToRGB(h * 0.33f, 0.9f, 0.95f);
         }
 
-        // ---------------------------------------------------------------- target health bar & damage numbers
-        void BuildTargetBar()
-        {
-            targetPanel = UiKit.Rect("Target", root, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -24), new Vector2(520, 96));
-            UiKit.Image(targetPanel, null, new Color(0.08f, 0.05f, 0.04f, 0.72f));
-            var nm = UiKit.Rect("Name", targetPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0.5f, 1), new Vector2(0, -4), new Vector2(0, 40));
-            targetName = UiKit.Text(nm, "", 30, UiKit.Cream);
-            var kd = UiKit.Rect("Kind", targetPanel, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0.5f, 1), new Vector2(0, -40), new Vector2(0, 26));
-            targetKind = UiKit.Text(kd, "", 22, Color.white);
-            var bar = UiKit.Rect("Bar", targetPanel, new Vector2(0.06f, 0), new Vector2(0.94f, 0), new Vector2(0.5f, 0), new Vector2(0, 10), new Vector2(0, 18));
-            UiKit.Image(bar, null, new Color(0.25f, 0.05f, 0.05f, 1f));
-            targetFill = UiKit.Rect("Fill", bar, Vector2.zero, Vector2.one, new Vector2(0, 0.5f), Vector2.zero, Vector2.zero);
-            targetFillImg = UiKit.Image(targetFill, null, new Color(0.85f, 0.15f, 0.12f));
-            targetPanel.gameObject.SetActive(false);
-        }
-
-        static Color KindColor(CreatureKind k) => k switch
-        {
-            CreatureKind.Animal => new Color(0.45f, 0.85f, 0.35f),
-            CreatureKind.Villager => new Color(0.45f, 0.7f, 1f),
-            _ => new Color(1f, 0.35f, 0.3f),
-        };
-
-        static string KindLabel(CreatureKind k) => k switch
-        {
-            CreatureKind.Animal => "животное",
-            CreatureKind.Villager => "житель аула",
-            _ => "враг",
-        };
-
-        /// <summary>Shows who was hit (name, kind, health) and floats the damage number at the hit point.</summary>
+        // ---------------------------------------------------------------- damage numbers
+        /// <summary>Floats the damage number at the hit point.</summary>
         public void ShowTarget(IHittable h, float dealt, bool crit, Vector3 worldPos)
         {
-            target = h; targetTimer = 3f;
+            // the hit creature's hearts show above its head (CreatureHearts); no name / health panel at the top
             if (dealt <= 0) return;
             var rt = UiKit.Center("Dmg", root, new Vector2(200, 50));
             var t = UiKit.Text(rt, (Mathf.Round(dealt * 10f) / 10f).ToString("0.#") + (crit ? "!" : ""), crit ? 40 : 32, crit ? UiKit.Gold : new Color(1f, 0.4f, 0.35f));
@@ -166,18 +133,6 @@ namespace Dala
 
         void UpdateTarget()
         {
-            targetTimer -= Time.deltaTime;
-            bool show = target != null && targetTimer > 0 && (target as Object) != null;
-            targetPanel.gameObject.SetActive(show);
-            if (show)
-            {
-                targetName.text = target.DisplayName;
-                targetKind.text = KindLabel(target.Kind) + (target.Alive ? $"   {Mathf.CeilToInt(target.Health)} / {Mathf.CeilToInt(target.MaxHealth)}" : "   повержен");
-                targetKind.color = KindColor(target.Kind);
-                float k = target.MaxHealth > 0 ? Mathf.Clamp01(target.Health / target.MaxHealth) : 0;
-                targetFill.anchorMax = new Vector2(k, 1);
-                targetFillImg.color = Color.Lerp(new Color(0.85f, 0.15f, 0.12f), KindColor(target.Kind), 0.35f);
-            }
             var cam = pc != null ? pc.Cam : null;
             for (int i = numbers.Count - 1; i >= 0; i--)
             {

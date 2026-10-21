@@ -111,7 +111,7 @@ namespace Dala
 
             var tm = p.Add<Tonemapping>(true); tm.mode.Override(TonemappingMode.ACES);
             bloom = p.Add<Bloom>(true);
-            bloom.threshold.Override(0.85f); bloom.intensity.Override(1.2f); bloom.scatter.Override(0.78f);
+            bloom.threshold.Override(1.1f); bloom.intensity.Override(1.2f); bloom.scatter.Override(0.78f);
             bloom.tint.Override(new Color(1f, 0.93f, 0.82f)); bloom.highQualityFiltering.Override(true);
             colorAdj = p.Add<ColorAdjustments>(true);
             colorAdj.postExposure.Override(0.45f); colorAdj.contrast.Override(12f); colorAdj.saturation.Override(20f);
@@ -164,7 +164,7 @@ namespace Dala
             Vector3 lightDir = moon ? -sunDir : sunDir;
             Sun.transform.rotation = Quaternion.LookRotation(-lightDir);
             float sunI = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-0.04f, 0.18f, elev)) * 2.3f;
-            float moonI = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-0.04f, -0.25f, elev)) * 0.38f;
+            float moonI = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(-0.04f, -0.25f, elev)) * 0.24f;
             Sun.intensity = (moon ? moonI : sunI) * (1f - Overcast * 0.65f);
             Sun.color = moon ? new Color(0.62f, 0.72f, 1f) : sunCol;
             Sun.shadowStrength = Mathf.Lerp(0.9f, 0.35f, Overcast);
@@ -173,10 +173,10 @@ namespace Dala
             // a bluer sky fill gives the cool shadows of shader packs against warm sunlight
             Color ambSky = Color.Lerp(zenith, horizon, 0.35f) * (0.62f + 0.38f * day) + new Color(0.03f, 0.045f, 0.08f);
             // moonlit night: dim blue but readable, like Minecraft's sky light at night
-            ambSky += new Color(0.07f, 0.09f, 0.16f) * night;
+            ambSky += new Color(0.035f, 0.045f, 0.09f) * night;
             Color ambGround = Color.Lerp(new Color(0.10f, 0.11f, 0.15f), new Color(0.36f, 0.31f, 0.24f), day);
             Shader.SetGlobalFloat(DayLightId, day * (1f - Overcast * 0.4f));
-            Shader.SetGlobalColor(BlockLightColorId, new Color(1.0f, 0.78f, 0.52f));
+            Shader.SetGlobalColor(BlockLightColorId, new Color(1.0f, 0.58f, 0.24f));
             Shader.SetGlobalColor(AmbSkyId, ambSky);
             Shader.SetGlobalColor(AmbGroundId, ambGround);
             RenderSettings.ambientSkyColor = ambSky;
@@ -228,11 +228,11 @@ namespace Dala
 
             if (colorAdj != null)
             {
-                colorAdj.postExposure.value = Mathf.Lerp(0.9f, 0.45f, day) - Overcast * 0.1f;
+                colorAdj.postExposure.value = Mathf.Lerp(0.55f, 0.05f, day) - Overcast * 0.1f;
                 colorAdj.saturation.value = Mathf.Lerp(-10f, 20f, day) - Overcast * 22f;
                 colorAdj.colorFilter.value = Color.Lerp(new Color(0.85f, 0.9f, 1f), Color.Lerp(Color.white, new Color(1f, 0.9f, 0.8f), sunset * 0.6f), day);
             }
-            if (bloom != null) bloom.intensity.value = Mathf.Lerp(0.6f, 1.2f, day) + sunset * 0.5f;
+            if (bloom != null) bloom.intensity.value = Mathf.Lerp(0.5f, 0.6f, day) + sunset * 0.3f;
         }
     }
 }

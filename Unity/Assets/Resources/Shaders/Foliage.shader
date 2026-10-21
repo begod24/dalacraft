@@ -78,7 +78,7 @@ Shader "Dala/Foliage"
                 half3 ambient = lerp(_AmbientGround.rgb, _AmbientSky.rgb, 0.75);
                 half direct = (0.65 + 0.35 * saturate(sun.direction.y)) * sun.shadowAttenuation;
                 half blockL = max(PointLevel(i.posWS), HandLevel(i.posWS));
-                half3 c = tex.rgb * (ambient * ao + sun.color * direct * ao + BlockLightTerm(blockL) * ao * 2.0 + 0.03);
+                half3 c = tex.rgb * (ambient * ao + sun.color * direct * ao + BlockLightTerm(blockL) * ao * 3.0 + 0.03);
                 c += tex.rgb * sun.color * 0.12 * i.h;      // light through the blades
                 return half4(MixFog(c, i.fog), 1);
             }

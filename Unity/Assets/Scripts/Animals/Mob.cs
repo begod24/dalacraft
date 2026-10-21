@@ -144,8 +144,15 @@ namespace Dala
                 }
             }
 
-            bool calm = (Info.Neutral && provoked <= 0) || (Info.Kind == MobKind.Karakurt && day && provoked <= 0) || pc.Stats.Dead || Session.Creative;
-            bool chase = !calm && dist < (Info.Ranged ? 22f : 18f) && SeesPlayer(w, pc);
+            bool calm = (Info.Neutral && provoked <= 0) || (Info.Kind == MobKind.Karakurt && day && provoked <= 0);
+            bool chasePlayer = !calm && !pc.Stats.Dead && !Session.Creative && dist < (Info.Ranged ? 22f : 18f) && SeesPlayer(w, pc);
+            // aul residents are prey too (like zombies and villagers): the nearest one, if closer than the player
+            preyCheck -= dt;
+            if (preyCheck <= 0) { preyCheck = 1f; prey = calm || Info.Neutral ? null : NearestVillager(16f); }
+            if (prey != null && !prey.Alive) prey = null;
+            bool chasePrey = prey != null && (!chasePlayer || (prey.transform.position - transform.position).magnitude < dist);
+            bool chase = chasePlayer || chasePrey;
+            if (chasePrey) { to = prey.transform.position - transform.position; dist = to.magnitude; }
             Vector3 dir;
             float speed;
             if (chase)
@@ -157,14 +164,18 @@ namespace Dala
                     // the archer keeps 6–12 m away and shoots
                     if (dist < 6f) dir = -dir;
                     else if (dist < 12f) speed = 0f;
-                    if (attackCd <= 0 && dist < 20f) { attackCd = 2.2f; anim?.PlayOnce("Attack", 1.2f); Shoot(pc); }
+                    if (attackCd <= 0 && dist < 20f) { attackCd = 2.2f; anim?.PlayOnce("Attack", 1.2f); Shoot(chasePrey ? prey.transform.position : pc.transform.position); }
                 }
                 else if (dist < Info.Radius + 1.3f + (Info.Kind == MobKind.Ayu ? 0.5f : 0f) && attackCd <= 0)
                 {
                     attackCd = Info.Kind == MobKind.Karakurt ? 0.9f : 1.2f;
                     anim?.PlayOnce("Attack");
-                    pc.Stats.Damage(Info.Damage, transform.position);
-                    if (Info.Fire) pc.Stats.SetOnFire(3f);
+                    if (chasePrey) prey.HurtBy(this, Info.Damage);
+                    else
+                    {
+                        pc.Stats.Damage(Info.Damage, transform.position);
+                        if (Info.Fire) pc.Stats.SetOnFire(3f);
+                    }
                 }
                 // the karakurt pounces from a few metres away
                 if (Info.Kind == MobKind.Karakurt && cc.isGrounded && dist > 2.5f && dist < 5f && attackCd <= 0.2f && Random.value < dt * 2f)
@@ -184,7 +195,7 @@ namespace Dala
             {
                 // spirits float about 1.5 m above the ground and drift to the player's head height when hunting
                 int ground = w.SurfaceY(Mathf.FloorToInt(transform.position.x), Mathf.FloorToInt(transform.position.z)) + 1;
-                float targetY = chase ? player.y + 0.8f : ground + 1.5f + Mathf.Sin(Time.time + transform.position.x) * 0.3f;
+                float targetY = chase ? transform.position.y + to.y + 0.8f : ground + 1.5f + Mathf.Sin(Time.time + transform.position.x) * 0.3f;
                 vy = Mathf.MoveTowards(vy, Mathf.Clamp(targetY - transform.position.y, -2f, 2f) * 2f, dt * 6f);
             }
             else if (cc.isGrounded)
@@ -233,13 +244,28 @@ namespace Dala
             return h.Distance > d.magnitude - 0.5f;
         }
 
-        void Shoot(PlayerController pc)
+        Villager prey;
+        float preyCheck;
+
+        Villager NearestVillager(float range)
+        {
+            Villager best = null; float bd = range * range;
+            foreach (var v in Villager.All)
+            {
+                if (v == null || !v.Alive) continue;
+                float d = (v.transform.position - transform.position).sqrMagnitude;
+                if (d < bd) { bd = d; best = v; }
+            }
+            return best;
+        }
+
+        void Shoot(Vector3 at)
         {
             // turn to the target first, so the arrow leaves the bow and not the archer's side
-            var look = pc.transform.position - transform.position; look.y = 0;
+            var look = at - transform.position; look.y = 0;
             if (look.sqrMagnitude > 0.01f) transform.rotation = Quaternion.LookRotation(look);
             var from = transform.position + Vector3.up * Info.Height * 0.8f + transform.forward * 0.5f;
-            var target = pc.transform.position + Vector3.up * 1.1f;
+            var target = at + Vector3.up * 1.1f;
             // ballistic aim: horizontal speed fixed, vertical speed chosen so gravity brings the arrow onto the target
             var d = target - from;
             var flat = new Vector3(d.x, 0, d.z);

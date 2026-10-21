@@ -239,8 +239,9 @@ namespace Dala
             if (cc.isGrounded)
             {
                 if (vy < 0) vy = -2f;
-                bool blocked = (cc.collisionFlags & CollisionFlags.Sides) != 0 && Mathf.Abs(speed) > 0.5f;
-                if (jump || (!HasRider && blocked)) vy = Mathf.Sqrt(1.4f * 2f * 25f);
+                // walking into a 1-block step hops onto it — with a rider too (Minecraft horses step up by themselves)
+                bool blocked = ((cc.collisionFlags & CollisionFlags.Sides) != 0 || StepAhead(w)) && Mathf.Abs(speed) > 0.5f;
+                if (jump || blocked) vy = Mathf.Sqrt(1.4f * 2f * 25f);
             }
             vy -= 25f * dt;
             move.y = vy;
@@ -270,7 +271,7 @@ namespace Dala
                 heading = Mathf.Atan2(away.x, away.z) * Mathf.Rad2Deg;
                 return;
             }
-            bool hunting = Sp.Name == "SnowLeopard" || mode == Mode.Chase || (WorldVisuals.Instance != null && WorldVisuals.Instance.SunElevation < -0.05f);
+            const bool hunting = true;          // wolves and snow leopards are hostile day and night
             if (Sp.Kind == Behaviour.Predator && dist < 16f && player != null && hunting && !Session.Creative)
             {
                 Vector3 to = player.position - transform.position; to.y = 0;
@@ -304,6 +305,16 @@ namespace Dala
             // wolves howl at night
             if (Sp.Name == "Wolf" && WorldVisuals.Instance != null && WorldVisuals.Instance.SunElevation < -0.1f && Random.value < 0.15f)
             { mode = Mode.Idle; modeTimer = 4f; anim?.PlayOnce("Howl"); }
+        }
+
+        /// <summary>A single solid block right in front of the feet with room above it.</summary>
+        bool StepAhead(World w)
+        {
+            Vector3 p = transform.position + transform.forward * Mathf.Sign(speed) * (Sp.Radius + 0.45f);
+            int x = Mathf.FloorToInt(p.x), z = Mathf.FloorToInt(p.z), y = Mathf.FloorToInt(transform.position.y + 0.1f);
+            var b = w.GetBlock(x, y, z);
+            return BlockInfo.IsSolid(b) && BlockInfo.ShapeOf(b) != Shape.Slab && !BlockInfo.IsFence(b)
+                && !BlockInfo.IsSolid(w.GetBlock(x, y + 1, z)) && !BlockInfo.IsSolid(w.GetBlock(x, y + 2, z));
         }
 
         bool AheadIsBad(World w)

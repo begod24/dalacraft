@@ -167,7 +167,27 @@ namespace Dala
             else { seen = Quaternion.Euler(-10f, 60f, 15f); offset = new Vector3(-0.02f, 0.07f, 0.02f); }
             itemModel.transform.localRotation = Quaternion.Inverse(RotRest) * seen;
             itemModel.transform.localPosition = Quaternion.Inverse(RotRest) * offset;
+            // a held torch burns: a small flame on its tip (the light itself is the shader hand light)
+            if (shownId == (int)BlockType.Torch)
+            {
+                var rs = itemModel.GetComponentsInChildren<Renderer>();
+                var top = itemModel.transform.position; float best = float.MinValue;
+                var up = itemModel.transform.up;
+                foreach (var r in rs)
+                {
+                    var b = r.bounds;
+                    foreach (var c in new[] { b.min, b.max, new Vector3(b.min.x, b.max.y, b.min.z), new Vector3(b.max.x, b.max.y, b.min.z), new Vector3(b.min.x, b.max.y, b.max.z) })
+                        if (Vector3.Dot(c, up) > best) { best = Vector3.Dot(c, up); top = c; }
+                }
+                var fire = new GameObject("Flame").AddComponent<FireVfx>();
+                fire.transform.SetParent(itemModel.transform, false);
+                fire.Scale = 0.18f;
+                fire.Build();
+                fire.transform.position = itemModel.transform.position + Vector3.Project(top - itemModel.transform.position, up) - up * 0.03f;
+                foreach (var l in fire.GetComponentsInChildren<Light>()) ItemVisuals.Kill(l.gameObject);
+            }
             ItemVisuals.SetLayer(itemModel, Layer);
         }
+
     }
 }
